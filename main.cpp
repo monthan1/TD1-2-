@@ -377,6 +377,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓描画処理ここから
 		///
 
+		/// 背景を黒で塗りつぶす
+		Novice::DrawBox(0, 0, 1280, 720,0, BLACK, kFillModeSolid);
+
 		// 0. ダッシュ予測ガイド線
 		if (!isAttacking && dashCount < kMaxDashes) {
 			float targetX = playerX + cosf(playerAngle) * dashDistance;
@@ -474,7 +477,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					(int)(playerRadius * 0.8f),
 					(int)(playerRadius * 0.8f),
 					0.0f,
-					0x33AAFFFF,
+					0x11AAFFFF,
 					kFillModeSolid
 				);
 			}
