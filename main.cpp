@@ -1,4 +1,5 @@
 #include <Novice.h>
+#include <stdlib.h>
 #include <math.h>
 
 const char kWindowTitle[] = "TD1_2回目!!";
@@ -40,6 +41,15 @@ struct AfterImage {
 	int isExist;
 };
 
+// ビーム命中時の火花パーティクル
+struct Spark {
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int life;
+	int isExist;
+};
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -85,6 +95,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const int kAfterImageConvergeFrames = 8;
 
 	AfterImage afterImages[kMaxAfterImages];
+
+	// 火花パーティクル設定
+	const int kMaxSparks = 200;
+	Spark sparks[kMaxSparks];
+
+	for (int i = 0; i < kMaxSparks; i++) {
+		sparks[i].isExist = 0;
+	}
 
 	for (int i = 0; i < kMaxAfterImages; i++) {
 		afterImages[i].isExist = 0;
@@ -335,6 +353,32 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						beams[currentAttackIndex].timer = 8; // ビームの持続フレーム数
 						beams[currentAttackIndex].isShot = 1;
 
+						// 火花を生成
+						for (int i = 0; i < 25; i++) {
+
+							for (int j = 0; j < kMaxSparks; j++) {
+
+								if (!sparks[j].isExist) {
+
+									float angle = (float)i / 25.0f * 6.28318f;
+
+									// 飛び散る速度をランダムに変える
+									float particleSpeed = 3.0f + (float)(rand() % 70) / 10.0f;
+
+									sparks[j].x = bossX;
+									sparks[j].y = bossY;
+
+									sparks[j].velocityX = cosf(angle) * particleSpeed;
+									sparks[j].velocityY = sinf(angle) * particleSpeed;
+
+									sparks[j].life = 30;
+									sparks[j].isExist = 1;
+
+									break;
+								}
+							}
+						}
+
 						boxes[currentAttackIndex].isExist = 0;
 					}
 
@@ -349,6 +393,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 					for (int i = 0; i < kMaxLines; i++) { lines[i].isExist = 0; }
 					lineCount = 0;
+				}
+			}
+		}
+
+		// 火花パーティクル更新
+		for (int i = 0; i < kMaxSparks; i++) {
+
+			if (sparks[i].isExist) {
+
+				sparks[i].x += sparks[i].velocityX;
+				sparks[i].y += sparks[i].velocityY;
+
+				// 徐々に減速
+				sparks[i].velocityX *= 0.94f;
+				sparks[i].velocityY *= 0.94f;
+
+				sparks[i].life--;
+
+				if (sparks[i].life <= 0) {
+					sparks[i].isExist = 0;
 				}
 			}
 		}
@@ -485,6 +549,25 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		// プレイヤー（常に自由に移動可能）
 		Novice::DrawEllipse((int)playerX, (int)playerY, (int)playerRadius, (int)playerRadius, 0.0f, BLUE, kFillModeSolid);
+
+		// 火花パーティクル描画
+		for (int i = 0; i < kMaxSparks; i++) {
+
+			if (sparks[i].isExist) {
+
+				int size = 1 + sparks[i].life / 10;
+
+				Novice::DrawBox(
+					(int)sparks[i].x,
+					(int)sparks[i].y,
+					size,
+					size,
+					0.0f,
+					0xFFFF00FF,
+					kFillModeSolid
+				);
+			}
+		}
 
 		// プレイヤーの視線
 		float lookX = playerX + cosf(playerAngle) * (playerRadius + 10.0f);
