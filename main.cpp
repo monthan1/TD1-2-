@@ -371,7 +371,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 									sparks[j].velocityX = cosf(angle) * particleSpeed;
 									sparks[j].velocityY = sinf(angle) * particleSpeed;
 
-									sparks[j].life = 30;
+									sparks[j].life = 40;
 									sparks[j].isExist = 1;
 
 									break;
