@@ -1,7 +1,7 @@
 #include <Novice.h>
 #include <math.h>
 
-const char kWindowTitle[] = "TD1_2回目";
+const char kWindowTitle[] = "TD1_2回目!!";
 
 // 画面に設置されるすべての長方形（サンズ風ブラスター砲台）
 struct BoxData {
