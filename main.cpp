@@ -31,6 +31,15 @@ struct BlasterBeam {
 	int timer; // 照射持続時間
 	int isShot;
 };
+// ダッシュ残像データ
+struct AfterImage {
+	float x;
+	float y;
+	float startX;
+	float startY;
+	int isExist;
+};
+
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -57,6 +66,29 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 移動・ダッシュ設定
 	float speed = 4.0f;
 	float dashDistance = 200.0f;
+
+	// ダッシュ後の硬直設定
+	int dashStunTimer = 0;
+	const int kDashStunMax = 30;
+
+	// ダッシュ移動設定
+	const int kDashMoveFrames = 6; // ダッシュ移動にかける時間
+	int dashMoveTimer = 0;
+
+	float dashStartX = 0.0f;
+	float dashStartY = 0.0f;
+	float dashTargetX = 0.0f;
+	float dashTargetY = 0.0f;
+
+	// 残像設定
+	const int kMaxAfterImages = 6;
+	const int kAfterImageConvergeFrames = 8;
+
+	AfterImage afterImages[kMaxAfterImages];
+
+	for (int i = 0; i < kMaxAfterImages; i++) {
+		afterImages[i].isExist = 0;
+	}
 
 	// ダッシュの連射防止用クールダウン（短時間の入力インターバルのみ）
 	int dashCooldown = 0;
@@ -115,6 +147,22 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// --- 2. クールダウンタイマーの減衰 ---
 		if (dashCooldown > 0) { dashCooldown--; }
 
+		// ダッシュ後の硬直タイマー
+		if (dashStunTimer > 0) {
+			dashStunTimer--;
+		}
+
+		// ダッシュ移動アニメーション
+		if (dashMoveTimer > 0) {
+
+			dashMoveTimer--;
+
+			float t = 1.0f - (float)dashMoveTimer / kDashMoveFrames;
+
+			playerX = dashStartX + (dashTargetX - dashStartX) * t;
+			playerY = dashStartY + (dashTargetY - dashStartY) * t;
+		}
+
 		// --- 3. 入力方向の取得 & 常時自由移動（ロック解除） ---
 		float moveX = 0.0f;
 		float moveY = 0.0f;
@@ -125,14 +173,49 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (keys[DIK_D]) moveX += 1.0f;
 
 		// WASD入力があれば向きを更新＆プレイヤーを動かす
+		// WASD入力があれば向きを更新
 		if (moveX != 0.0f || moveY != 0.0f) {
+
 			playerAngle = atan2f(moveY, moveX);
 
-			// ベクトルの正規化
-			float len = sqrtf(moveX * moveX + moveY * moveY);
-			if (len > 0.0f) {
-				playerX += (moveX / len) * speed;
-				playerY += (moveY / len) * speed;
+			// 硬直中でなければ移動できる
+			if (dashStunTimer == 0) {
+
+				// ベクトルの正規化
+				float len = sqrtf(moveX * moveX + moveY * moveY);
+
+				if (len > 0.0f) {
+					playerX += (moveX / len) * speed;
+					playerY += (moveY / len) * speed;
+				}
+			}
+		}
+
+		// 残像の収束処理
+		for (int i = 0; i < kMaxAfterImages; i++) {
+
+			if (afterImages[i].isExist) {
+
+				// 硬直終了まで残像を維持
+				if (dashStunTimer <= kAfterImageConvergeFrames) {
+
+					float t = 1.0f -
+						(float)dashStunTimer / kAfterImageConvergeFrames;
+
+					// プレイヤーの位置に向かって収束
+					afterImages[i].x =
+						afterImages[i].startX +
+						(playerX - afterImages[i].startX) * t;
+
+					afterImages[i].y =
+						afterImages[i].startY +
+						(playerY - afterImages[i].startY) * t;
+
+					// 硬直終了と同時に消す
+					if (dashStunTimer == 0) {
+						afterImages[i].isExist = 0;
+					}
+				}
 			}
 		}
 
@@ -144,8 +227,39 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			float dashDirX = cosf(playerAngle);
 			float dashDirY = sinf(playerAngle);
 
-			playerX += dashDirX * dashDistance;
-			playerY += dashDirY * dashDistance;
+			// ダッシュの移動先を設定
+			dashStartX = startX;
+			dashStartY = startY;
+
+			dashTargetX = startX + dashDirX * dashDistance;
+			dashTargetY = startY + dashDirY * dashDistance;
+
+			// 画面外に出ないようにする
+			if (dashTargetX < playerRadius) dashTargetX = playerRadius;
+			if (dashTargetX > 1280.0f - playerRadius) dashTargetX = 1280.0f - playerRadius;
+			if (dashTargetY < playerRadius) dashTargetY = playerRadius;
+			if (dashTargetY > 720.0f - playerRadius) dashTargetY = 720.0f - playerRadius;
+
+			// ダッシュ開始
+			dashMoveTimer = kDashMoveFrames;
+
+			// 硬直開始
+			dashStunTimer = kDashStunMax;
+
+			// 残像を生成
+			for (int i = 0; i < kMaxAfterImages; i++) {
+
+				float ratio = (float)i / (kMaxAfterImages - 1);
+
+				afterImages[i].x = dashStartX + (dashTargetX - dashStartX) * ratio;
+				afterImages[i].y = dashStartY + (dashTargetY - dashStartY) * ratio;
+
+				// 収束開始時の位置を保存
+				afterImages[i].startX = afterImages[i].x;
+				afterImages[i].startY = afterImages[i].y;
+
+				afterImages[i].isExist = 1;
+			}
 
 			// 【1】メインの大きな長方形（ブラスター砲台）
 			if (boxCount < kMaxBoxes) {
@@ -163,8 +277,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			for (int p = 0; p < 3; p++) {
 				if (boxCount < kMaxBoxes) {
 					float ratio = (float)(p + 1) / 4.0f;
-					boxes[boxCount].x = startX + (playerX - startX) * ratio;
-					boxes[boxCount].y = startY + (playerY - startY) * ratio;
+					boxes[boxCount].x = startX + (dashTargetX - startX) * ratio;
+					boxes[boxCount].y = startY + (dashTargetY - startY) * ratio;
 					boxes[boxCount].width = 12;
 					boxes[boxCount].height = 28;
 					boxes[boxCount].color = 0x00FFFFFF; // シアンブルー
@@ -178,8 +292,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			if (lineCount < kMaxLines) {
 				lines[lineCount].startX = startX;
 				lines[lineCount].startY = startY;
-				lines[lineCount].endX = playerX;
-				lines[lineCount].endY = playerY;
+				lines[lineCount].endX = dashTargetX;
+				lines[lineCount].endY = dashTargetY;
 				lines[lineCount].isExist = 1;
 				lineCount++;
 			}
@@ -280,31 +394,31 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 2. 敵をリアルタイム追尾するすべての砲台長方形
 		for (int i = 0; i < boxCount; i++) {
 			if (boxes[i].isExist && boxes[i].delay == 0) {
+			
+				// ボスの方向を向く小さなひし形
 				float dx = bossX - boxes[i].x;
 				float dy = bossY - boxes[i].y;
-				float angle = atan2f(dy, dx) - 1.5708f;
+				float angle = atan2f(dy, dx);
 
-				// 外枠（黒枠）
-				Novice::DrawBox(
-					(int)boxes[i].x - (boxes[i].width / 2) - 2,
-					(int)boxes[i].y - 2,
-					boxes[i].width + 4,
-					boxes[i].height + 4,
-					angle,
-					0x000000FF,
-					kFillModeSolid
-				);
+				// ひし形の大きさ
+				float size = 10.0f;
 
-				// 本体
-				Novice::DrawBox(
-					(int)boxes[i].x - (boxes[i].width / 2),
-					(int)boxes[i].y,
-					boxes[i].width,
-					boxes[i].height,
-					angle,
-					boxes[i].color,
-					kFillModeSolid
-				);
+				// 4つの頂点
+				int x1 = (int)(boxes[i].x + cosf(angle) * size);
+				int y1 = (int)(boxes[i].y + sinf(angle) * size);
+
+				int x2 = (int)(boxes[i].x + cosf(angle + 1.5708f) * size);
+				int y2 = (int)(boxes[i].y + sinf(angle + 1.5708f) * size);
+
+				int x3 = (int)(boxes[i].x + cosf(angle + 3.14159f) * size);
+				int y3 = (int)(boxes[i].y + sinf(angle + 3.14159f) * size);
+
+				int x4 = (int)(boxes[i].x + cosf(angle - 1.5708f) * size);
+				int y4 = (int)(boxes[i].y + sinf(angle - 1.5708f) * size);
+
+				// ひし形を描画
+				Novice::DrawTriangle(x1, y1, x2, y2, x3, y3, boxes[i].color, kFillModeSolid);
+				Novice::DrawTriangle(x1, y1, x3, y3, x4, y4, boxes[i].color, kFillModeSolid);
 			}
 		}
 
@@ -348,6 +462,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		// ボス（赤い丸）
 		Novice::DrawEllipse((int)bossX, (int)bossY, (int)bossRadius, (int)bossRadius, 0.0f, RED, kFillModeSolid);
+
+		// ダッシュ残像描画
+		for (int i = 0; i < kMaxAfterImages; i++) {
+
+			if (afterImages[i].isExist) {
+
+				Novice::DrawEllipse(
+					(int)afterImages[i].x,
+					(int)afterImages[i].y,
+					(int)(playerRadius * 0.8f),
+					(int)(playerRadius * 0.8f),
+					0.0f,
+					0x33AAFFFF,
+					kFillModeSolid
+				);
+			}
+		}
 
 		// プレイヤー（常に自由に移動可能）
 		Novice::DrawEllipse((int)playerX, (int)playerY, (int)playerRadius, (int)playerRadius, 0.0f, BLUE, kFillModeSolid);
