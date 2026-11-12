@@ -62,6 +62,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	char preKeys[256] = { 0 };
 
 	int bokasiTexture = Novice::LoadTexture("./Resources/bokasi.png");
+	int hosiTexture = Novice::LoadTexture("./Resources/hosi.png");
 
 	// ボスのデータ
 	float bossX = 640.0f;
@@ -548,13 +549,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
-		// プレイヤー（常に自由に移動可能）
 		Novice::DrawSprite(
-			(int)(playerX - 60),
-			(int)(playerY - 60),
+			(int)(playerX - 52),
+			(int)(playerY - 50),
 			bokasiTexture,
 			0.15f,
 			0.15f,
+			0.0f,
+			0x330033FF
+		);
+
+		// プレイヤー（常に自由に移動可能）
+		Novice::DrawSprite(
+			(int)(playerX - 32),
+			(int)(playerY - 32),
+			hosiTexture,
+			1.0f,
+			1.0f,
 			0.0f,
 			WHITE
 		);
