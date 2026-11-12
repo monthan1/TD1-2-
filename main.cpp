@@ -76,7 +76,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	float playerAngle = -1.5708f; // 向き（初期値：上向き）
 
 	// 移動・ダッシュ設定
-	float speed = 4.0f;
+	float speed = 8.0f;
 	float dashDistance = 200.0f;
 
 	// ダッシュ後の硬直設定
@@ -373,7 +373,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 									sparks[j].velocityX = cosf(angle) * particleSpeed;
 									sparks[j].velocityY = sinf(angle) * particleSpeed;
 
-									sparks[j].life = 30;
+									sparks[j].life = 40;
 									sparks[j].isExist = 1;
 
 									break;
@@ -410,7 +410,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				// 徐々に減速
 				sparks[i].velocityX *= 0.94f;
 				sparks[i].velocityY *= 0.94f;
-
 				sparks[i].life--;
 
 				if (sparks[i].life <= 0) {
