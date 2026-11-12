@@ -61,6 +61,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	char keys[256] = { 0 };
 	char preKeys[256] = { 0 };
 
+	int bokasiTexture = Novice::LoadTexture("./Resources/bokasi.png");
+
 	// ボスのデータ
 	float bossX = 640.0f;
 	float bossY = 180.0f;
@@ -442,7 +444,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		/// 背景を黒で塗りつぶす
-		Novice::DrawBox(0, 0, 1280, 720,0, BLACK, kFillModeSolid);
+		Novice::DrawBox(0, 0, 1280, 720, 0, BLACK, kFillModeSolid);
 
 		// 0. ダッシュ予測ガイド線
 		if (!isAttacking && dashCount < kMaxDashes) {
@@ -461,7 +463,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 2. 敵をリアルタイム追尾するすべての砲台長方形
 		for (int i = 0; i < boxCount; i++) {
 			if (boxes[i].isExist && boxes[i].delay == 0) {
-			
+
 				// ボスの方向を向く小さなひし形
 				float dx = bossX - boxes[i].x;
 				float dy = bossY - boxes[i].y;
@@ -548,7 +550,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		// プレイヤー（常に自由に移動可能）
-		Novice::DrawEllipse((int)playerX, (int)playerY, (int)playerRadius, (int)playerRadius, 0.0f, BLUE, kFillModeSolid);
+		Novice::DrawSprite(
+			(int)(playerX - 60),
+			(int)(playerY - 60),
+			bokasiTexture,
+			0.15f,
+			0.15f,
+			0.0f,
+			WHITE
+		);
 
 		// 火花パーティクル描画
 		for (int i = 0; i < kMaxSparks; i++) {
