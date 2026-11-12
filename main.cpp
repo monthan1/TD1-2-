@@ -75,6 +75,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	float bossRadius = 60.0f;
 	float bossSpeedX = 4.0f;
 
+	// ボスの突進設定
+	int bossState = 0;
+	// 0：通常移動
+	// 1：狙いを定める
+	// 2：突進
+	// 3：休憩
+
+	int bossAttackTimer = 180;
+	float bossChargeVelocityX = 0.0f;
+	float bossChargeVelocityY = 0.0f;
+
 	// プレイヤーのデータ
 	float playerX = 640.0f;
 	float playerY = 550.0f;
@@ -165,10 +176,80 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓更新処理ここから
 		///
 
-		// --- 1. ボスの移動 ---
-		bossX += bossSpeedX;
-		if (bossX - bossRadius <= 0.0f || bossX + bossRadius >= 1280.0f) {
-			bossSpeedX *= -1.0f;
+		// --- 1. ボスの移動・突進処理 ---
+
+// 通常移動
+		if (bossState == 0) {
+
+			bossX += bossSpeedX;
+
+			if (bossX - bossRadius <= 0.0f ||
+				bossX + bossRadius >= 1280.0f) {
+				bossSpeedX *= -1.0f;
+			}
+
+			bossAttackTimer--;
+
+			// 突進準備開始
+			if (bossAttackTimer <= 0) {
+				bossState = 1;
+				bossAttackTimer = 45;
+			}
+		}
+
+		// 狙いを定める
+		else if (bossState == 1) {
+
+			bossAttackTimer--;
+
+			// 45フレーム経過したら突進
+			if (bossAttackTimer <= 0) {
+
+				// プレイヤーの方向を計算
+				float dx = playerX - bossX;
+				float dy = playerY - bossY;
+
+				float length = sqrtf(dx * dx + dy * dy);
+
+				if (length > 0.0f) {
+					bossChargeVelocityX = dx / length * 22.0f;
+					bossChargeVelocityY = dy / length * 22.0f;
+				}
+
+				bossState = 2;
+				bossAttackTimer = 30;
+			}
+		}
+
+		// 突進
+		else if (bossState == 2) {
+
+			bossX += bossChargeVelocityX;
+			bossY += bossChargeVelocityY;
+
+			bossAttackTimer--;
+
+			// 画面端に到達したら突進終了
+			if (bossX - bossRadius < 0.0f ||
+				bossX + bossRadius > 1280.0f ||
+				bossY - bossRadius < 0.0f ||
+				bossY + bossRadius > 720.0f ||
+				bossAttackTimer <= 0) {
+
+				bossState = 3;
+				bossAttackTimer = 60;
+			}
+		}
+
+		// 休憩
+		else if (bossState == 3) {
+
+			bossAttackTimer--;
+
+			if (bossAttackTimer <= 0) {
+				bossState = 0;
+				bossAttackTimer = 150;
+			}
 		}
 
 		// --- 2. クールダウンタイマーの減衰 ---
@@ -598,8 +679,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
-		// ボス（赤い丸）
-		Novice::DrawEllipse((int)bossX, (int)bossY, (int)bossRadius, (int)bossRadius, 0.0f, RED, kFillModeSolid);
+		// ボス
+		unsigned int bossColor = RED;
+
+		// 突進前は白くなる
+		if (bossState == 1) {
+			bossColor = WHITE;
+		}
+
+		// 突進中は白くなる
+		if (bossState == 2) {
+			bossColor = WHITE;
+		}
+
+		Novice::DrawEllipse(
+			(int)bossX,
+			(int)bossY,
+			(int)bossRadius,
+			(int)bossRadius,
+			0.0f,
+			bossColor,
+			kFillModeSolid
+		);
 
 		// ダッシュ残像描画
 		for (int i = 0; i < kMaxAfterImages; i++) {
