@@ -24,14 +24,19 @@ struct DashLine {
 	int isExist;  // 存在フラグ
 };
 
-// ガスターブラスター風極太レーザー構造体
 struct BlasterBeam {
-	float startX;
-	float startY;
-	float angle;
-	int timer; // 照射持続時間
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	float speed;
 	int isShot;
+
+	// 弾の後ろに残る残像
+	float trailX[8];
+	float trailY[8];
 };
+
 // ダッシュ残像データ
 struct AfterImage {
 	float x;
@@ -124,18 +129,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	BoxData boxes[kMaxBoxes];
 	int boxCount = 0;
 
+	// 加速する弾データ
+	BlasterBeam beams[kMaxBoxes];
+
 	// ダッシュ軌道線データ
 	const int kMaxLines = 100;
 	DashLine lines[kMaxLines];
 	int lineCount = 0;
 
 	// サンズ風ビームデータ
-	BlasterBeam beams[kMaxBoxes];
 	for (int i = 0; i < kMaxBoxes; i++) {
 		boxes[i].isExist = 0;
 		boxes[i].delay = 0;
 		beams[i].isShot = 0;
-		beams[i].timer = 0;
 	}
 	for (int i = 0; i < kMaxLines; i++) {
 		lines[i].isExist = 0;
@@ -347,39 +353,36 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						float startX = boxes[currentAttackIndex].x;
 						float startY = boxes[currentAttackIndex].y;
 
+						// ボスの中心座標を狙う
 						float dx = bossX - startX;
 						float dy = bossY - startY;
 
-						beams[currentAttackIndex].startX = startX;
-						beams[currentAttackIndex].startY = startY;
-						beams[currentAttackIndex].angle = atan2f(dy, dx) - 1.5708f;
-						beams[currentAttackIndex].timer = 8; // ビームの持続フレーム数
+						float length = sqrtf(dx * dx + dy * dy);
+
+						if (length > 0.0f) {
+							beams[currentAttackIndex].velocityX = dx / length;
+							beams[currentAttackIndex].velocityY = dy / length;
+						}
+						else {
+							beams[currentAttackIndex].velocityX = 0.0f;
+							beams[currentAttackIndex].velocityY = -1.0f;
+						}
+
+						// 弾の発射位置
+						beams[currentAttackIndex].x = startX;
+						beams[currentAttackIndex].y = startY;
+
+						// 最初はゆっくり
+						beams[currentAttackIndex].speed = 0.5f;
+
 						beams[currentAttackIndex].isShot = 1;
 
-						// 火花を生成
-						for (int i = 0; i < 25; i++) {
+						beams[currentAttackIndex].isShot = 1;
 
-							for (int j = 0; j < kMaxSparks; j++) {
-
-								if (!sparks[j].isExist) {
-
-									float angle = (float)i / 25.0f * 6.28318f;
-
-									// 飛び散る速度をランダムに変える
-									float particleSpeed = 3.0f + (float)(rand() % 70) / 10.0f;
-
-									sparks[j].x = bossX;
-									sparks[j].y = bossY;
-
-									sparks[j].velocityX = cosf(angle) * particleSpeed;
-									sparks[j].velocityY = sinf(angle) * particleSpeed;
-
-									sparks[j].life = 40;
-									sparks[j].isExist = 1;
-
-									break;
-								}
-							}
+						// 残像の位置を発射位置に合わせる
+						for (int i = 0; i < 8; i++) {
+							beams[currentAttackIndex].trailX[i] = startX;
+							beams[currentAttackIndex].trailY[i] = startY;
 						}
 
 						boxes[currentAttackIndex].isExist = 0;
@@ -419,11 +422,71 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
-		// ビームタイマー更新
+		// 弾の移動・加速処理
 		for (int i = 0; i < kMaxBoxes; i++) {
 			if (beams[i].isShot) {
-				beams[i].timer--;
-				if (beams[i].timer <= 0) {
+
+				// 残像の位置を後ろにずらす
+				for (int j = 7; j > 0; j--) {
+					beams[i].trailX[j] = beams[i].trailX[j - 1];
+					beams[i].trailY[j] = beams[i].trailY[j - 1];
+				}
+
+				// 一番新しい残像の位置
+				beams[i].trailX[0] = beams[i].x;
+				beams[i].trailY[0] = beams[i].y;
+
+				// どんどん加速する
+				beams[i].speed += 0.1f + beams[i].speed * 0.2f;
+
+				// 最高速度を上げる
+				if (beams[i].speed > 35.0f)
+				{
+					beams[i].speed = 35.0f;
+				}
+
+				// 弾を移動
+				beams[i].x += beams[i].velocityX * beams[i].speed;
+				beams[i].y += beams[i].velocityY * beams[i].speed;
+
+				float dx = bossX - beams[i].x;
+				float dy = bossY - beams[i].y;
+
+				// ボスに弾が当たったら
+				if (dx * dx + dy * dy <
+					(bossRadius + 10.0f) * (bossRadius + 10.0f)) {
+
+					// 弾を消す
+					beams[i].isShot = 0;
+
+					// ボスの中心からパーティクルを発生
+					for (int p = 0; p < 25; p++) {
+
+						for (int j = 0; j < kMaxSparks; j++) {
+
+							if (!sparks[j].isExist) {
+
+								float sparkAngle = (float)p / 25.0f * 6.28318f;
+
+								float particleSpeed = 3.0f + (float)(rand() % 70) / 10.0f;
+
+								sparks[j].x = bossX;
+								sparks[j].y = bossY;
+
+								sparks[j].velocityX = cosf(sparkAngle) * particleSpeed;
+								sparks[j].velocityY = sinf(sparkAngle) * particleSpeed;
+
+								sparks[j].life = 40;
+								sparks[j].isExist = 1;
+
+								break;
+							}
+						}
+					}
+				}
+
+				if (beams[i].x < -50 || beams[i].x > 1330 ||
+					beams[i].y < -50 || beams[i].y > 770) {
 					beams[i].isShot = 0;
 				}
 			}
@@ -491,39 +554,45 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
-		// 3. サンズ風「ガスターブラスター極太レーザー」の多層描画
+		// 3. ビーム弾の描画
 		for (int i = 0; i < kMaxBoxes; i++) {
 			if (beams[i].isShot) {
-				// 最外枠：シアンオーラ
-				Novice::DrawBox(
-					(int)beams[i].startX - 14,
-					(int)beams[i].startY,
-					28,
-					1200,
-					beams[i].angle,
+
+				// 後ろに残る残像
+				for (int j = 7; j >= 0; j--) {
+
+					int size = 3 + (7 - j);
+
+					Novice::DrawEllipse(
+						(int)beams[i].trailX[j],
+						(int)beams[i].trailY[j],
+						size,
+						size,
+						0.0f,
+						0x00FFFFFF,
+						kFillModeSolid
+					);
+				}
+
+				// 弾の外側
+				Novice::DrawEllipse(
+					(int)beams[i].x,
+					(int)beams[i].y,
+					12,
+					12,
+					0.0f,
 					0x00FFFFFF,
 					kFillModeSolid
 				);
 
-				// 中間層：黒い輪郭
-				Novice::DrawBox(
-					(int)beams[i].startX - 9,
-					(int)beams[i].startY,
-					18,
-					1200,
-					beams[i].angle,
-					0x000000FF,
-					kFillModeSolid
-				);
-
-				// 中心コア：ホワイトビーム
-				Novice::DrawBox(
-					(int)beams[i].startX - 5,
-					(int)beams[i].startY,
-					10,
-					1200,
-					beams[i].angle,
-					0xFFFFFFFF,
+				// 弾の中心
+				Novice::DrawEllipse(
+					(int)beams[i].x,
+					(int)beams[i].y,
+					6,
+					6,
+					0.0f,
+					WHITE,
 					kFillModeSolid
 				);
 			}
