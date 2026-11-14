@@ -252,6 +252,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 画面シェイク設定
+		int screenShakeTimer = 0;
+		const int kScreenShakeDuration = 15;
+
+		float screenShakeX = 0.0f;
+		float screenShakeY = 0.0f;
+
 		// --- 2. クールダウンタイマーの減衰 ---
 		if (dashCooldown > 0) { dashCooldown--; }
 
@@ -537,6 +544,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				if (dx * dx + dy * dy <
 					(bossRadius + 10.0f) * (bossRadius + 10.0f)) {
 
+					// 画面シェイク開始
+					screenShakeTimer = kScreenShakeDuration;
+
 					// 弾を消す
 					beams[i].isShot = 0;
 
@@ -573,6 +583,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 画面シェイク更新
+		if (screenShakeTimer > 0) {
+
+			screenShakeTimer--;
+
+			// 徐々に揺れを弱くする
+			float shakePower = 12.0f *
+				((float)screenShakeTimer / kScreenShakeDuration);
+
+			screenShakeX = (float)(rand() % 200 - 100) / 100.0f * shakePower;
+			screenShakeY = (float)(rand() % 200 - 100) / 100.0f * shakePower;
+
+		} else {
+			screenShakeX = 0.0f;
+			screenShakeY = 0.0f;
+		}
+
 		// 画面外制限
 		if (playerX - playerRadius < 0.0f) { playerX = playerRadius; }
 		if (playerX + playerRadius > 1280.0f) { playerX = 1280.0f - playerRadius; }
@@ -587,9 +614,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓描画処理ここから
 		///
 
-		/// 背景を黒で塗りつぶす
-		Novice::DrawBox(0, 0, 1280, 720, 0, BLACK, kFillModeSolid);
-
+		Novice::DrawBox(
+			(int)screenShakeX,
+			(int)screenShakeY,
+			1200,
+			700,
+			0,
+			BLACK,
+			kFillModeSolid
+		);
 		// 0. ダッシュ予測ガイド線
 		if (!isAttacking && dashCount < kMaxDashes) {
 			float targetX = playerX + cosf(playerAngle) * dashDistance;
