@@ -1,8 +1,12 @@
 #pragma once
 
 #include <Novice.h>
+#include <Xinput.h>
 
 namespace Controller {
+
+    void SetVibration(unsigned short left, unsigned short right);
+    void StopVibration();
 
     // Novice側のPadButton型を利用
     using Button = ::PadButton;

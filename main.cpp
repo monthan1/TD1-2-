@@ -1,6 +1,7 @@
 #include <Novice.h>
 #include <stdlib.h>
 #include <math.h>
+#include<Xinput.h>
 #include "Controller.h"
 
 const char kWindowTitle[] = "TD1_2回目!!";
@@ -166,6 +167,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int attackTimer = 0;
 	int currentAttackIndex = 0;
 
+	// 振動設定
+	int vibrationTimer = 0;
+	const int kVibrationDuration = 3;
+
 	// ウィンドウの×ボタンが押されるまでループ
 	while (Novice::ProcessMessage() == 0) {
 		// フレームの開始
@@ -181,6 +186,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 		/// ↓更新処理ここから
 		///
+		
+		// 振動タイマーの減衰
+		if (vibrationTimer > 0) {
+			vibrationTimer--;
+
+			if (vibrationTimer == 0) {
+				Controller::StopVibration();
+			}
+		}
 
 		// --- 1. ボスの移動・突進処理 ---
 
@@ -311,7 +325,6 @@ if (moveX != 0.0f || moveY != 0.0f) {
         }
     }
 }
-
 
 		// 残像の収束処理
 		for (int i = 0; i < kMaxAfterImages; i++) {
@@ -554,7 +567,11 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 				// ボスに弾が当たったら
 				if (dx * dx + dy * dy <
-					(bossRadius + 10.0f) * (bossRadius + 10.0f)) {
+					(bossRadius + 10.0f) * (bossRadius + 10.0f))
+				{
+					vibrationTimer = kVibrationDuration;
+					// 振動の強さ
+					Controller::SetVibration(10000, 10000);
 
 					// 画面シェイク開始
 					screenShakeTimer = kScreenShakeDuration;
@@ -825,6 +842,7 @@ if (moveX != 0.0f || moveY != 0.0f) {
 		}
 	}
 
+	Controller::StopVibration();
 	Novice::Finalize();
 	return 0;
 }

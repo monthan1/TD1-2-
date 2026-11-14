@@ -1,6 +1,23 @@
 #include "Controller.h"
 
 namespace Controller {
+    void SetVibration(unsigned short left, unsigned short right)
+    {
+        // 振動処理
+        XINPUT_VIBRATION vibration{};
+
+        vibration.wLeftMotorSpeed = left;
+        vibration.wRightMotorSpeed = right;
+
+        XInputSetState(0, &vibration);
+    }
+
+    void StopVibration()
+    {
+        XINPUT_VIBRATION vibration{};
+
+        XInputSetState(0, &vibration);
+    }
 
     // コントローラー番号
     const int kJoystickNo = 0;
