@@ -1,6 +1,7 @@
 #include <Novice.h>
 #include <stdlib.h>
 #include <math.h>
+#include "Controller.h"
 
 const char kWindowTitle[] = "TD1_2回目!!";
 
@@ -61,6 +62,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// ライブラリの初期化
 	Novice::Initialize(kWindowTitle, 1280, 720);
+
+	Controller::Initialize();
 
 	// キー入力受け取り用の配列
 	char keys[256] = { 0 };
@@ -167,6 +170,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	while (Novice::ProcessMessage() == 0) {
 		// フレームの開始
 		Novice::BeginFrame();
+
+		// コントローラー入力を受け取る
+		Controller::Update();
 
 		// キー入力を受け取る
 		memcpy(preKeys, keys, 256);
@@ -279,32 +285,33 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		// --- 3. 入力方向の取得 & 常時自由移動（ロック解除） ---
-		float moveX = 0.0f;
-		float moveY = 0.0f;
+		
+		// コントローラー入力(なんと-を付けると入力方向が逆になります)
+float moveX = Controller::GetLeftStickX();
+float moveY = Controller::GetLeftStickY();
 
-		if (keys[DIK_W]) moveY -= 1.0f;
-		if (keys[DIK_S]) moveY += 1.0f;
-		if (keys[DIK_A]) moveX -= 1.0f;
-		if (keys[DIK_D]) moveX += 1.0f;
+// キーボード入力
+if (keys[DIK_W]) moveY -= 1.0f;
+if (keys[DIK_S]) moveY += 1.0f;
+if (keys[DIK_A]) moveX -= 1.0f;
+if (keys[DIK_D]) moveX += 1.0f;
 
-		// WASD入力があれば向きを更新＆プレイヤーを動かす
-		// WASD入力があれば向きを更新
-		if (moveX != 0.0f || moveY != 0.0f) {
+// 入力があれば向きを更新
+if (moveX != 0.0f || moveY != 0.0f) {
 
-			playerAngle = atan2f(moveY, moveX);
+    playerAngle = atan2f(moveY, moveX);
 
-			// 硬直中でなければ移動できる
-			if (dashStunTimer == 0) {
+    if (dashStunTimer == 0) {
 
-				// ベクトルの正規化
-				float len = sqrtf(moveX * moveX + moveY * moveY);
+        float len = sqrtf(moveX * moveX + moveY * moveY);
 
-				if (len > 0.0f) {
-					playerX += (moveX / len) * speed;
-					playerY += (moveY / len) * speed;
-				}
-			}
-		}
+        if (len > 0.0f) {
+            playerX += (moveX / len) * speed;
+            playerY += (moveY / len) * speed;
+        }
+    }
+}
+
 
 		// 残像の収束処理
 		for (int i = 0; i < kMaxAfterImages; i++) {
@@ -335,7 +342,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		// --- 4. ダッシュ実行（移動制限なし・いつでもダッシュ可能） ---
-		if (dashCooldown == 0 && !isAttacking && (keys[DIK_SPACE] && !preKeys[DIK_SPACE]) && dashCount < kMaxDashes) {
+
+		if (dashCooldown == 0 &&
+			!isAttacking &&
+			Controller::IsPressed(kPadButton10) &&
+			dashCount < kMaxDashes) {
+
 			float startX = playerX;
 			float startY = playerY;
 
