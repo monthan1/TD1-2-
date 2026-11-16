@@ -358,7 +358,8 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 		if (dashCooldown == 0 &&
 			!isAttacking &&
-			Controller::IsPressed(kPadButton10) &&
+			(Controller::IsPressed(kPadButton10) ||
+				(preKeys[DIK_SPACE] == 0 && keys[DIK_SPACE] != 0)) &&
 			dashCount < kMaxDashes) {
 
 			float startX = playerX;
@@ -521,12 +522,12 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 			if (sparks[i].isExist) {
 
-				sparks[i].x += sparks[i].velocityX;
-				sparks[i].y += sparks[i].velocityY;
+				sparks[i].x += sparks[i].velocityX * 1.2f;
+				sparks[i].y += sparks[i].velocityY * 1.2f;
 
 				// 徐々に減速
-				sparks[i].velocityX *= 0.94f;
-				sparks[i].velocityY *= 0.94f;
+				sparks[i].velocityX *= 0.93f;
+				sparks[i].velocityY *= 0.93f;
 				sparks[i].life--;
 
 				if (sparks[i].life <= 0) {
@@ -706,6 +707,20 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 					int size = 3 + (7 - j);
 
+					// 円の直径に合わせてぼかしのサイズを決める
+					float blurScale = (size * 2.0f) / 700.0f;
+
+					Novice::DrawSprite(
+						(int)(beams[i].trailX[j] - size),
+						(int)(beams[i].trailY[j] - size),
+						bokasiTexture,
+						blurScale,
+						blurScale,
+						0.0f,
+						0x33FFFFFF
+					);
+
+					// 残像本体
 					Novice::DrawEllipse(
 						(int)beams[i].trailX[j],
 						(int)beams[i].trailY[j],
@@ -716,6 +731,16 @@ if (moveX != 0.0f || moveY != 0.0f) {
 						kFillModeSolid
 					);
 				}
+				// 弾のぼかし
+				Novice::DrawSprite(
+					(int)(beams[i].x - 21.0f),
+					(int)(beams[i].y - 21.0f),
+					bokasiTexture,
+					0.06f,
+					0.06f,
+					0.0f,
+					0x33FFFFFF
+				);
 
 				// 弾の外側
 				Novice::DrawEllipse(
@@ -808,7 +833,19 @@ if (moveX != 0.0f || moveY != 0.0f) {
 			if (sparks[i].isExist) {
 
 				int size = 1 + sparks[i].life / 10;
+				float size2 = 0.01f + (float)sparks[i].life / 2000.0f;
+				// 火花の後ろにぼかしを描画
+				Novice::DrawSprite(
+					(int)(sparks[i].x - 4),
+					(int)(sparks[i].y - 5),
+					bokasiTexture,
+					size2,
+					size2,
+					0.0f,
+					0xFF663333
+				);
 
+				// 火花本体
 				Novice::DrawBox(
 					(int)sparks[i].x,
 					(int)sparks[i].y,
