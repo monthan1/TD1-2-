@@ -142,10 +142,28 @@ struct Bomb
 {
     float x;
     float y;
+    float velocityX;
+    float velocityY;
     int timer;
     int life;
     int isExist;
     int exploded;
+    int isFalling;
+    int isGlitch;
+};
+
+// グリッチパーティクル構造体
+struct GlitchParticle
+{
+    float x;
+    float y;
+    float velocityX;
+    float velocityY;
+    int width;
+    int height;
+    int life;
+    unsigned int color;
+    int isExist;
 };
 
 // 残像の共通描画処理
@@ -198,6 +216,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
     float bossAuraAlpha = 0.0f;
     float bossChargeVelocityX = 0.0f;
     float bossChargeVelocityY = 0.0f;
+    float bossRotationAngle = 0.0f;
+    int bossSpinTimer = 0;
 
     // プレイヤーのデータ
     float playerX = 640.0f;
@@ -256,6 +276,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
     Bomb bombs[kMaxBombs];
     int bombDropTimer = 0;
 
+    // グリッチエフェクトの設定
+    const int kMaxGlitchParticles = 200;
+    GlitchParticle glitchParticles[kMaxGlitchParticles];
+
     // 画面シェイク
     int screenShakeTimer = 0;
     int vibrationTimer = 0;
@@ -294,6 +318,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
     // 爆弾の初期化
     for (int bombInitIndex = 0; bombInitIndex < kMaxBombs; bombInitIndex++) {
         bombs[bombInitIndex].isExist = 0;
+        bombs[bombInitIndex].isGlitch = 0;
+    }
+
+    // グリッチパーティクルの初期化
+    for (int glitchInitIndex = 0; glitchInitIndex < kMaxGlitchParticles; glitchInitIndex++) {
+        glitchParticles[glitchInitIndex].isExist = 0;
     }
 
     for (int sparkInitIndex = 0; sparkInitIndex < kMaxSparks; sparkInitIndex++) {
@@ -471,6 +501,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
                         bombs[bombSpawnIndex].x = bossX - bossChargeVelocityX * 1.5f;
                         bombs[bombSpawnIndex].y = bossY - bossChargeVelocityY * 1.5f;
+                        bombs[bombSpawnIndex].velocityX = 0.0f;
+                        bombs[bombSpawnIndex].velocityY = 0.0f;
+                        bombs[bombSpawnIndex].isFalling = 0;
+                        bombs[bombSpawnIndex].isGlitch = 0;
 
                         bombs[bombSpawnIndex].timer = 45;
                         bombs[bombSpawnIndex].life = 0;
@@ -502,8 +536,60 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
             bossAttackTimer--;
 
             if (bossAttackTimer <= 0) {
+                bossState = 4;
+                bossAttackTimer = 120;
+                bossSpinTimer = 0;
+            }
+        }
+
+        else if (bossState == 4) {
+
+            // その場で回転
+            bossRotationAngle += 0.18f;
+
+            // 爆弾を投げるタイマー
+            bossSpinTimer++;
+
+            if (bossSpinTimer >= 18) {
+
+                bossSpinTimer = 0;
+
+                for (int bombSpawnIndex = 0;
+                    bombSpawnIndex < kMaxBombs;
+                    bombSpawnIndex++) {
+
+                    if (!bombs[bombSpawnIndex].isExist) {
+
+                        float dx = playerX - bossX;
+                        float dy = playerY - bossY;
+
+                        float length = sqrtf(dx * dx + dy * dy);
+
+                        if (length > 0.0f) {
+                            bombs[bombSpawnIndex].velocityX = dx / length * 7.0f;
+                            bombs[bombSpawnIndex].velocityY = dy / length * 7.0f;
+                        }
+
+                        bombs[bombSpawnIndex].x = bossX;
+                        bombs[bombSpawnIndex].y = bossY;
+                        bombs[bombSpawnIndex].isFalling = 1;
+                        bombs[bombSpawnIndex].isGlitch = 1;
+
+                        bombs[bombSpawnIndex].timer = 55;
+                        bombs[bombSpawnIndex].life = 0;
+                        bombs[bombSpawnIndex].exploded = 0;
+                        bombs[bombSpawnIndex].isExist = 1;
+
+                        break;
+                    }
+                }
+            }
+
+            bossAttackTimer--;
+
+            if (bossAttackTimer <= 0) {
                 bossState = 0;
-                bossAttackTimer = 150;
+                bossAttackTimer = 180;
             }
         }
 
@@ -883,15 +969,70 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
             if (bombs[bombUpdateIndex].isExist) {
 
                 if (!bombs[bombUpdateIndex].exploded) {
+                    // 爆弾を移動させる
+                    if (bombs[bombUpdateIndex].isFalling) {
+
+                        bombs[bombUpdateIndex].x += bombs[bombUpdateIndex].velocityX;
+                        bombs[bombUpdateIndex].y += bombs[bombUpdateIndex].velocityY;
+
+                        // 少しずつ下に落ちる
+                        bombs[bombUpdateIndex].velocityY += 0.12f;
+                    }
 
                     bombs[bombUpdateIndex].timer--;
 
                     if (bombs[bombUpdateIndex].timer <= 0) {
 
                         bombs[bombUpdateIndex].exploded = 1;
-                        bombs[bombUpdateIndex].life = 25;
 
-                        screenShakeTimer = 12;
+                        if (bombs[bombUpdateIndex].isGlitch) {
+                            bombs[bombUpdateIndex].life = 12;
+                            screenShakeTimer = 4;
+
+                            // グリッチパーティクルを発生
+                            for (int p = 0; p < 50; p++) {
+
+                                for (int glitchSpawnIndex = 0;
+                                    glitchSpawnIndex < kMaxGlitchParticles;
+                                    glitchSpawnIndex++) {
+
+                                    if (!glitchParticles[glitchSpawnIndex].isExist) {
+
+                                        float angle = (float)(rand() % 628) / 100.0f;
+                                        float particleSpeed = 2.0f + (float)(rand() % 90) / 10.0f;
+
+                                        glitchParticles[glitchSpawnIndex].x = bombs[bombUpdateIndex].x;
+                                        glitchParticles[glitchSpawnIndex].y = bombs[bombUpdateIndex].y;
+                                        glitchParticles[glitchSpawnIndex].velocityX = cosf(angle) * particleSpeed;
+                                        glitchParticles[glitchSpawnIndex].velocityY = sinf(angle) * particleSpeed;
+                                        glitchParticles[glitchSpawnIndex].width = 7 + rand() % 14;
+                                        glitchParticles[glitchSpawnIndex].height = 5 + rand() % 9;
+                                        glitchParticles[glitchSpawnIndex].life = 8 + rand() % 9;
+
+                                        int colorType = rand() % 4;
+                                        if (colorType == 0) {
+                                            glitchParticles[glitchSpawnIndex].color = 0xFF2255FF;
+                                        }
+                                        else if (colorType == 1) {
+                                            glitchParticles[glitchSpawnIndex].color = 0xAA22FFFF;
+                                        }
+                                        else if (colorType == 2) {
+                                            glitchParticles[glitchSpawnIndex].color = 0x00FFFFFF;
+                                        }
+                                        else {
+                                            glitchParticles[glitchSpawnIndex].color = WHITE;
+                                        }
+
+                                        glitchParticles[glitchSpawnIndex].isExist = 1;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        else {
+                            bombs[bombUpdateIndex].life = 25;
+                            screenShakeTimer = 12;
+                        }
                     }
                 }
                 else {
@@ -901,6 +1042,27 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
                     if (bombs[bombUpdateIndex].life <= 0) {
                         bombs[bombUpdateIndex].isExist = 0;
                     }
+                }
+            }
+        }
+
+        // グリッチパーティクルの更新
+        for (int glitchUpdateIndex = 0;
+            glitchUpdateIndex < kMaxGlitchParticles;
+            glitchUpdateIndex++) {
+
+            if (glitchParticles[glitchUpdateIndex].isExist) {
+
+                glitchParticles[glitchUpdateIndex].x += glitchParticles[glitchUpdateIndex].velocityX;
+                glitchParticles[glitchUpdateIndex].y += glitchParticles[glitchUpdateIndex].velocityY;
+
+                glitchParticles[glitchUpdateIndex].velocityX *= 0.88f;
+                glitchParticles[glitchUpdateIndex].velocityY *= 0.88f;
+
+                glitchParticles[glitchUpdateIndex].life--;
+
+                if (glitchParticles[glitchUpdateIndex].life <= 0) {
+                    glitchParticles[glitchUpdateIndex].isExist = 0;
                 }
             }
         }
@@ -1361,6 +1523,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
         if (bossState == 1 || bossState == 2) {
             bossColor = WHITE;
         }
+        else if (bossState == 4) {
+            bossColor = 0xFF6600FF;
+        }
 
         // ボスの危険な赤いオーラ
         if (bossState == 1) {
@@ -1650,6 +1815,65 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
                         kFillModeWireFrame
                     );
                 }
+                else if (bombs[bombDrawIndex].isGlitch) {
+
+                    // グリッチ爆発の中心フラッシュ
+                    if (bombs[bombDrawIndex].life > 8) {
+                        Novice::DrawEllipse(
+                            (int)x,
+                            (int)y,
+                            55,
+                            55,
+                            0.0f,
+                            WHITE,
+                            kFillModeSolid
+                        );
+                    }
+
+                    // 横方向にずれたデジタルノイズ
+                    for (int glitchLineIndex = 0; glitchLineIndex < 12; glitchLineIndex++) {
+
+                        int offsetX = rand() % 181 - 90;
+                        int offsetY = rand() % 141 - 70;
+                        int lineWidth = 18 + rand() % 70;
+                        int lineHeight = 4 + rand() % 8;
+
+                        unsigned int glitchColor = 0x00FFFFFF;
+                        if (glitchLineIndex % 4 == 0) {
+                            glitchColor = 0xFF2255FF;
+                        }
+                        else if (glitchLineIndex % 4 == 1) {
+                            glitchColor = 0xAA22FFFF;
+                        }
+                        else if (glitchLineIndex % 4 == 2) {
+                            glitchColor = WHITE;
+                        }
+
+                        Novice::DrawBox(
+                            (int)x + offsetX,
+                            (int)y + offsetY,
+                            lineWidth,
+                            lineHeight,
+                            0.0f,
+                            glitchColor,
+                            kFillModeSolid
+                        );
+                    }
+
+                    // 爆発の輪郭を一瞬だけ表示
+                    if (bombs[bombDrawIndex].life > 5) {
+                        int glitchRadius = (12 - bombs[bombDrawIndex].life) * 16 + 35;
+                        Novice::DrawEllipse(
+                            (int)x,
+                            (int)y,
+                            glitchRadius,
+                            glitchRadius,
+                            0.0f,
+                            0x00FFFFFF,
+                            kFillModeWireFrame
+                        );
+                    }
+                }
                 else {
 
                     float ratio = (float)bombs[bombDrawIndex].life / 25.0f;
@@ -1833,13 +2057,79 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
             }
         }
 
+        // グリッチパーティクル描画
+        for (int glitchDrawIndex = 0;
+            glitchDrawIndex < kMaxGlitchParticles;
+            glitchDrawIndex++) {
+
+            if (glitchParticles[glitchDrawIndex].isExist) {
+
+                Novice::DrawBox(
+                    (int)glitchParticles[glitchDrawIndex].x + screenShakeX,
+                    (int)glitchParticles[glitchDrawIndex].y + screenShakeY,
+                    glitchParticles[glitchDrawIndex].width,
+                    glitchParticles[glitchDrawIndex].height,
+                    0.0f,
+                    glitchParticles[glitchDrawIndex].color,
+                    kFillModeSolid
+                );
+            }
+        }
+
         // ボスの描画
-        Novice::DrawEllipse(
-            (int)bossX + screenShakeX,
-            (int)bossY + screenShakeY,
-            (int)bossRadius,
-            (int)bossRadius,
-            0.0f,
+        float bossSize = bossRadius;
+
+        float bossCos = cosf(bossRotationAngle);
+        float bossSin = sinf(bossRotationAngle);
+
+        float cornerX[4] = {};
+        float cornerY[4] = {};
+
+        float localX[4] = {
+            -bossSize,
+             bossSize,
+             bossSize,
+            -bossSize
+        };
+
+        float localY[4] = {
+            -bossSize,
+            -bossSize,
+             bossSize,
+             bossSize
+        };
+
+        // 四角形の頂点を回転させる
+        for (int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
+
+            cornerX[cornerIndex] =
+                bossX + localX[cornerIndex] * bossCos -
+                localY[cornerIndex] * bossSin;
+
+            cornerY[cornerIndex] =
+                bossY + localX[cornerIndex] * bossSin +
+                localY[cornerIndex] * bossCos;
+        }
+
+        // 四角形を描画
+        Novice::DrawTriangle(
+            (int)cornerX[0] + screenShakeX,
+            (int)cornerY[0] + screenShakeY,
+            (int)cornerX[1] + screenShakeX,
+            (int)cornerY[1] + screenShakeY,
+            (int)cornerX[2] + screenShakeX,
+            (int)cornerY[2] + screenShakeY,
+            bossColor,
+            kFillModeSolid
+        );
+
+        Novice::DrawTriangle(
+            (int)cornerX[0] + screenShakeX,
+            (int)cornerY[0] + screenShakeY,
+            (int)cornerX[2] + screenShakeX,
+            (int)cornerY[2] + screenShakeY,
+            (int)cornerX[3] + screenShakeX,
+            (int)cornerY[3] + screenShakeY,
             bossColor,
             kFillModeSolid
         );
