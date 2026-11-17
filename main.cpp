@@ -39,15 +39,6 @@ struct BlasterBeam {
 	float trailY[8];
 };
 
-// ダッシュ残像データ
-struct AfterImage {
-	float x;
-	float y;
-	float startX;
-	float startY;
-	int isExist;
-};
-
 // ビーム命中時の火花パーティクル
 struct Spark {
 	float x;
@@ -55,6 +46,16 @@ struct Spark {
 	float velocityX;
 	float velocityY;
 	int life;
+	int isExist;
+};
+
+struct AfterImage {
+	float x;
+	float y;
+	float startX;
+	float startY;
+	float scale;
+	int alpha;
 	int isExist;
 };
 
@@ -118,6 +119,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const int kAfterImageConvergeFrames = 8;
 
 	AfterImage afterImages[kMaxAfterImages];
+
+	for (int i = 0; i < kMaxAfterImages; i++) {
+		afterImages[i].x = 0.0f;
+		afterImages[i].y = 0.0f;
+		afterImages[i].startX = 0.0f;
+		afterImages[i].startY = 0.0f;
+		afterImages[i].scale = 1.0f;
+		afterImages[i].alpha = 0;
+		afterImages[i].isExist = 0;
+	}
 
 	// 火花パーティクル設定
 	const int kMaxSparks = 200;
@@ -300,9 +311,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		// --- 3. 入力方向の取得 & 常時自由移動（ロック解除） ---
 		
-		// コントローラー入力(なんと-を付けると入力方向が逆になります)
-float moveX = Controller::GetLeftStickX();
-float moveY = Controller::GetLeftStickY();
+		// コントローラー入力（左スティック）
+		float moveX = Controller::GetLeftStickX();
+		float moveY = Controller::GetLeftStickY();
+
+		// 十字ボタン入力
+		if (Controller::IsDown(kPadButton0)) {
+			moveY -= 1.0f; // 上
+		}
+		if (Controller::IsDown(kPadButton1)) {
+			moveY += 1.0f; // 下
+		}
+		if (Controller::IsDown(kPadButton2)) {
+			moveX -= 1.0f; // 左
+		}
+		if (Controller::IsDown(kPadButton3)) {
+			moveX += 1.0f; // 右
+		}
 
 // キーボード入力
 if (keys[DIK_W]) moveY -= 1.0f;
@@ -330,6 +355,13 @@ if (moveX != 0.0f || moveY != 0.0f) {
 		for (int i = 0; i < kMaxAfterImages; i++) {
 
 			if (afterImages[i].isExist) {
+
+				// 残像を徐々に透明にする
+				afterImages[i].alpha -= 5;
+
+				if (afterImages[i].alpha < 0) {
+					afterImages[i].alpha = 0;
+				}
 
 				// 硬直終了まで残像を維持
 				if (dashStunTimer <= kAfterImageConvergeFrames) {
@@ -392,12 +424,20 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 				float ratio = (float)i / (kMaxAfterImages - 1);
 
-				afterImages[i].x = dashStartX + (dashTargetX - dashStartX) * ratio;
-				afterImages[i].y = dashStartY + (dashTargetY - dashStartY) * ratio;
+				afterImages[i].x =
+					dashStartX + (dashTargetX - dashStartX) * ratio;
 
-				// 収束開始時の位置を保存
+				afterImages[i].y =
+					dashStartY + (dashTargetY - dashStartY) * ratio;
+
 				afterImages[i].startX = afterImages[i].x;
 				afterImages[i].startY = afterImages[i].y;
+
+				// 残像の大きさ
+				afterImages[i].scale = 1.0f;
+
+				// 残像の透明度
+				afterImages[i].alpha = 100 - i * 12;
 
 				afterImages[i].isExist = 1;
 			}
@@ -572,7 +612,7 @@ if (moveX != 0.0f || moveY != 0.0f) {
 				{
 					vibrationTimer = kVibrationDuration;
 					// 振動の強さ
-					Controller::SetVibration(10000, 10000);
+					Controller::SetVibration(60000, 60000);
 
 					// 画面シェイク開始
 					screenShakeTimer = kScreenShakeDuration;
@@ -794,14 +834,44 @@ if (moveX != 0.0f || moveY != 0.0f) {
 
 			if (afterImages[i].isExist) {
 
-				Novice::DrawEllipse(
-					(int)afterImages[i].x,
-					(int)afterImages[i].y,
-					(int)(playerRadius * 0.8f),
-					(int)(playerRadius * 0.8f),
+				// 残像ごとのサイズ
+				float outerScale = 0.18f * afterImages[i].scale;
+				float innerScale = 0.13f * afterImages[i].scale;
+
+				// 透明度を色に反映
+				unsigned int alpha = (unsigned int)afterImages[i].alpha;
+
+				// 外側のぼかし
+				Novice::DrawSprite(
+					(int)(afterImages[i].x - 63),
+					(int)(afterImages[i].y - 63),
+					bokasiTexture,
+					outerScale,
+					outerScale,
 					0.0f,
-					0x11AAFFFF,
-					kFillModeSolid
+					(alpha / 2) << 24 | 0x000033FF
+				);
+
+				// 内側のぼかし
+				Novice::DrawSprite(
+					(int)(afterImages[i].x - 45),
+					(int)(afterImages[i].y - 45),
+					bokasiTexture,
+					innerScale,
+					innerScale,
+					0.0f,
+					alpha << 24 | 0x000066FF
+				);
+
+				// 残像本体
+				Novice::DrawSprite(
+					(int)(afterImages[i].x - 32),
+					(int)(afterImages[i].y - 32),
+					hosiTexture,
+					1.0f,
+					1.0f,
+					0.0f,
+					alpha << 24 | 0x00FFFFFF
 				);
 			}
 		}
