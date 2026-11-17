@@ -193,7 +193,7 @@ void DrawAfterImage(float x, float y, float radius, int life, int maxLife, unsig
 // Windowsアプリでのエントリーポイント
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
-    Novice::Initialize(kWindowTitle, 1280, 720);
+    Novice::Initialize(kWindowTitle, 1920, 1180);
 
     Controller::Initialize();
 
@@ -246,39 +246,39 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
     const int kAfterImageLife = 20;
 
-    AfterImage afterImages[kMaxAfterImages];
+    AfterImage afterImages[kMaxAfterImages] = {};
 
     // ボス残像発生タイマー
     int afterImageTimer = 0;
 
     // 火花パーティクル設定
     const int kMaxSparks = 200;
-    Spark sparks[kMaxSparks];
+    Spark sparks[kMaxSparks] = {};
 
     // 衝撃波設定
     const int kMaxShockWaves = 20;
-    ShockWave shockWaves[kMaxShockWaves];
+    ShockWave shockWaves[kMaxShockWaves] = {};
 
     // 放射状ヒットエフェクト設定
     const int kMaxHitBursts = 20;
-    HitBurst hitBursts[kMaxHitBursts];
+    HitBurst hitBursts[kMaxHitBursts] = {};
 
     // ボス爆発エフェクト設定
     const int kMaxBossExplosions = 100;
-    BossExplosion bossExplosions[kMaxBossExplosions];
+    BossExplosion bossExplosions[kMaxBossExplosions] = {};
 
     // ボス爆発パーティクル設定
     const int kMaxBossExplosionParticles = 300;
-    BossExplosionParticle bossExplosionParticles[kMaxBossExplosionParticles];
+    BossExplosionParticle bossExplosionParticles[kMaxBossExplosionParticles] = {};
 
     // 爆弾の設定
     const int kMaxBombs = 30;
-    Bomb bombs[kMaxBombs];
+    Bomb bombs[kMaxBombs] = {};
     int bombDropTimer = 0;
 
     // グリッチエフェクトの設定
     const int kMaxGlitchParticles = 200;
-    GlitchParticle glitchParticles[kMaxGlitchParticles];
+    GlitchParticle glitchParticles[kMaxGlitchParticles] = {};
 
     // 画面シェイク
     int screenShakeTimer = 0;
@@ -341,16 +341,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
     const int kMaxDashes = 4;
 
     const int kMaxBoxes = 16;
-    BoxData boxes[kMaxBoxes];
+    BoxData boxes[kMaxBoxes] = {};
     int boxCount = 0;
 
-    Diamond diamonds[kMaxBoxes];
+    Diamond diamonds[kMaxBoxes] = {};
 
-    BlasterBeam beams[kMaxBoxes];
-    LaserBeam lasers[kMaxBoxes];
+    BlasterBeam beams[kMaxBoxes] = {};
+    LaserBeam lasers[kMaxBoxes] = {};
 
     const int kMaxLines = 100;
-    DashLine lines[kMaxLines];
+    DashLine lines[kMaxLines] = {};
     int lineCount = 0;
 
     // 砲台の初期化
@@ -984,6 +984,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
                     if (bombs[bombUpdateIndex].timer <= 0) {
 
                         bombs[bombUpdateIndex].exploded = 1;
+
+                        // 衝撃波を発生
+                        for (int shockSpawnIndex = 0;
+                            shockSpawnIndex < kMaxShockWaves;
+                            shockSpawnIndex++) {
+
+                            if (!shockWaves[shockSpawnIndex].isExist) {
+                                shockWaves[shockSpawnIndex].x = bombs[bombUpdateIndex].x;
+                                shockWaves[shockSpawnIndex].y = bombs[bombUpdateIndex].y;
+                                shockWaves[shockSpawnIndex].radius = 18.0f;
+                                shockWaves[shockSpawnIndex].alpha = 1.0f;
+                                shockWaves[shockSpawnIndex].isExist = 1;
+                                break;
+                            }
+                        }
 
                         if (bombs[bombUpdateIndex].isGlitch) {
                             bombs[bombUpdateIndex].life = 12;
@@ -1876,202 +1891,76 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
                 }
                 else {
 
-                    float ratio = (float)bombs[bombDrawIndex].life / 25.0f;
                     int radius = (int)((25.0f - bombs[bombDrawIndex].life) * 5.0f + 10.0f);
-                    float pulse = sinf((float)bombs[bombDrawIndex].life * 0.7f);
 
-                    for (int smokeIndex = 0; smokeIndex < 9; smokeIndex++) {
-
-                        float smokeAngle = (float)smokeIndex * 6.28318f / 9.0f;
-                        float smokeDistance = radius * 0.58f;
-                        int smokeSize = (int)(7.0f + (1.0f - ratio) * 7.0f);
-
-                        Novice::DrawEllipse(
-                            (int)(x + cosf(smokeAngle) * smokeDistance),
-                            (int)(y + sinf(smokeAngle) * smokeDistance),
-                            smokeSize,
-                            smokeSize,
-                            0.0f,
-                            0x555555FF,
-                            kFillModeSolid
-                        );
-                    }
-
-                    // 爆発の外側の光
-                    for (int flameIndex = 0; flameIndex < 18; flameIndex++) {
-
-                        float angle1 = (float)flameIndex * 6.28318f / 18.0f;
-                        float angle2 = (float)(flameIndex + 1) * 6.28318f / 18.0f;
-
-                        float spike1 = 0.72f;
-                        float spike2 = 0.72f;
-                        if (flameIndex % 2 == 0) {
-                            spike1 = 1.18f;
-                        }
-                        if ((flameIndex + 1) % 2 == 0) {
-                            spike2 = 1.18f;
-                        }
-
-                        float outerRadius1 = radius * spike1 * (1.0f + pulse * 0.04f);
-                        float outerRadius2 = radius * spike2 * (1.0f + pulse * 0.04f);
-
-                        int point1X = (int)(x + cosf(angle1) * outerRadius1);
-                        int point1Y = (int)(y + sinf(angle1) * outerRadius1);
-                        int point2X = (int)(x + cosf(angle2) * outerRadius2);
-                        int point2Y = (int)(y + sinf(angle2) * outerRadius2);
-
-                        Novice::DrawTriangle(
-                            (int)x,
-                            (int)y,
-                            point1X,
-                            point1Y,
-                            point2X,
-                            point2Y,
-                            0xCC2200FF,
-                            kFillModeSolid
-                        );
-                    }
-
-                    // 爆発の中間の光
-                    for (int flameInnerIndex = 0; flameInnerIndex < 16; flameInnerIndex++) {
-
-                        float angle1 = (float)flameInnerIndex * 6.28318f / 16.0f;
-                        float angle2 = (float)(flameInnerIndex + 1) * 6.28318f / 16.0f;
-
-                        float spike1 = 0.78f;
-                        float spike2 = 0.78f;
-                        if (flameInnerIndex % 2 == 0) {
-                            spike1 = 1.12f;
-                        }
-                        if ((flameInnerIndex + 1) % 2 == 0) {
-                            spike2 = 1.12f;
-                        }
-
-                        float innerRadius1 = radius * 0.78f * spike1;
-                        float innerRadius2 = radius * 0.78f * spike2;
-
-                        Novice::DrawTriangle(
-                            (int)x,
-                            (int)y,
-                            (int)(x + cosf(angle1) * innerRadius1),
-                            (int)(y + sinf(angle1) * innerRadius1),
-                            (int)(x + cosf(angle2) * innerRadius2),
-                            (int)(y + sinf(angle2) * innerRadius2),
-                            0xFF6600FF,
-                            kFillModeSolid
-                        );
-                    }
-
-                    for (int flameCoreIndex = 0; flameCoreIndex < 14; flameCoreIndex++) {
-
-                        float angle1 = (float)flameCoreIndex * 6.28318f / 14.0f;
-                        float angle2 = (float)(flameCoreIndex + 1) * 6.28318f / 14.0f;
-
-                        float coreScale1 = 0.82f;
-                        float coreScale2 = 0.82f;
-                        if (flameCoreIndex % 2 == 0) {
-                            coreScale1 = 1.1f;
-                        }
-                        if ((flameCoreIndex + 1) % 2 == 0) {
-                            coreScale2 = 1.1f;
-                        }
-                        float coreRadius1 = radius * 0.48f * coreScale1;
-                        float coreRadius2 = radius * 0.48f * coreScale2;
-
-                        Novice::DrawTriangle(
-                            (int)x,
-                            (int)y,
-                            (int)(x + cosf(angle1) * coreRadius1),
-                            (int)(y + sinf(angle1) * coreRadius1),
-                            (int)(x + cosf(angle2) * coreRadius2),
-                            (int)(y + sinf(angle2) * coreRadius2),
-                            0xFFCC00FF,
-                            kFillModeSolid
-                        );
-                    }
-
-                    // 爆発の中心
+                    // 外側の円
                     Novice::DrawEllipse(
                         (int)x,
                         (int)y,
-                        radius / 4,
-                        radius / 4,
+                        radius,
+                        radius,
                         0.0f,
-                        WHITE,
+                        0xFF4400FF,
                         kFillModeSolid
                     );
 
-                    // 爆発から飛び散る光
-                    for (int rayIndex = 0; rayIndex < 20; rayIndex++) {
-
-                        float angle = (float)rayIndex * 6.28318f / 20.0f;
-
-                        float innerRadius = radius * 0.65f;
-                        float outerRadius = radius + 35.0f * ratio;
-
-                        Novice::DrawLine(
-                            (int)(x + cosf(angle) * innerRadius),
-                            (int)(y + sinf(angle) * innerRadius),
-                            (int)(x + cosf(angle) * outerRadius),
-                            (int)(y + sinf(angle) * outerRadius),
-                            WHITE
-                        );
-                    }
-
-                    for (int emberIndex = 0; emberIndex < 12; emberIndex++) {
-
-                        float emberAngle = (float)emberIndex * 6.28318f / 12.0f + (float)bombs[bombDrawIndex].life * 0.08f;
-                        float emberDistance = radius * (1.05f + (float)(emberIndex % 3) * 0.12f);
-                        int emberSize = 2;
-                        if (emberIndex % 3 == 0) {
-                            emberSize = 4;
-                        }
-
-                        unsigned int emberColor = 0xFFAA00FF;
-                        if (emberIndex % 2 == 0) {
-                            emberColor = WHITE;
-                        }
-
-                        Novice::DrawEllipse(
-                            (int)(x + cosf(emberAngle) * emberDistance),
-                            (int)(y + sinf(emberAngle) * emberDistance),
-                            emberSize,
-                            emberSize,
-                            0.0f,
-                            emberColor,
-                            kFillModeSolid
-                        );
-                    }
-
-                    // 爆発の輪
+                    // 中間の円
                     Novice::DrawEllipse(
                         (int)x,
                         (int)y,
-                        radius + 20,
-                        radius + 20,
+                        (int)(radius * 0.7f),
+                        (int)(radius * 0.7f),
                         0.0f,
                         0xFFAA00FF,
-                        kFillModeWireFrame
+                        kFillModeSolid
+                    );
+
+                    // 中心の円
+                    Novice::DrawEllipse(
+                        (int)x,
+                        (int)y,
+                        (int)(radius * 0.35f),
+                        (int)(radius * 0.35f),
+                        0.0f,
+                        WHITE,
+                        kFillModeSolid
                     );
                 }
             }
         }
 
-        // グリッチパーティクル描画
-        for (int glitchDrawIndex = 0;
-            glitchDrawIndex < kMaxGlitchParticles;
-            glitchDrawIndex++) {
+        // 衝撃波の描画
+        for (int shockDrawIndex = 0;
+            shockDrawIndex < kMaxShockWaves;
+            shockDrawIndex++) {
 
-            if (glitchParticles[glitchDrawIndex].isExist) {
+            if (shockWaves[shockDrawIndex].isExist) {
 
-                Novice::DrawBox(
-                    (int)glitchParticles[glitchDrawIndex].x + screenShakeX,
-                    (int)glitchParticles[glitchDrawIndex].y + screenShakeY,
-                    glitchParticles[glitchDrawIndex].width,
-                    glitchParticles[glitchDrawIndex].height,
+                int x = (int)shockWaves[shockDrawIndex].x + screenShakeX;
+                int y = (int)shockWaves[shockDrawIndex].y + screenShakeY;
+
+                int radius = (int)shockWaves[shockDrawIndex].radius;
+                unsigned int shockAlpha =
+                    (unsigned int)(shockWaves[shockDrawIndex].alpha * 255.0f);
+
+                // 外側の衝撃波
+                Novice::DrawEllipse(
+                    x, y,
+                    radius,
+                    (int)(radius * 0.72f),
                     0.0f,
-                    glitchParticles[glitchDrawIndex].color,
-                    kFillModeSolid
+                    0xFF882200 | shockAlpha,
+                    kFillModeWireFrame
+                );
+
+                // 内側の衝撃波
+                Novice::DrawEllipse(
+                    x, y,
+                    (int)(radius * 0.82f),
+                    (int)(radius * 0.58f),
+                    0.0f,
+                    0xFFCC6600 | shockAlpha,
+                    kFillModeWireFrame
                 );
             }
         }
