@@ -1,5 +1,6 @@
 #include <Novice.h>
 #include <stdlib.h>
+#include <time.h>
 #include <math.h>
 #include <string.h>
 #include <Xinput.h>
@@ -187,6 +188,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Novice::Initialize(kWindowTitle, 1920, 1180);
 
 	Controller::Initialize();
+
+	// time(NULL)現在の時刻を取得する　(unsigned int)数値の型を変換する　srand()ランダム数値の初期設定をする
+	srand((unsigned int)time(NULL));
 
 	// キー入力結果を受け取る箱
 	char keys[256] = { 0 };
@@ -1133,14 +1137,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 							if (!sparks[sparkSpawnIndex].isExist) {
 
-								float sparkAngle = (float)p / 25.0f * 6.28318f;
-								float particleSpeed = 3.0f + (float)(rand() % 70) / 10.0f;
+							
 
 								sparks[sparkSpawnIndex].x = bossX;
 								sparks[sparkSpawnIndex].y = bossY;
 
-								sparks[sparkSpawnIndex].velocityX = cosf(sparkAngle) * particleSpeed;
-								sparks[sparkSpawnIndex].velocityY = sinf(sparkAngle) * particleSpeed;
+								// X・Y方向の速度をランダムに設定
+								sparks[sparkSpawnIndex].velocityX =
+									static_cast<float>(rand() % 160 - 80) / 10.0f;
+
+								sparks[sparkSpawnIndex].velocityY =
+									static_cast<float>(rand() % 160 - 80) / 10.0f;
 
 								sparks[sparkSpawnIndex].life = 40;
 								sparks[sparkSpawnIndex].isExist = 1;
@@ -1230,18 +1237,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 							if (!sparks[laserSparkIndex].isExist) {
 
-								float sparkAngle = (float)p / 25.0f * 6.28318f;
-								float particleSpeed = 3.0f + (float)(rand() % 70) / 10.0f;
-
 								sparks[laserSparkIndex].x = bossX;
 								sparks[laserSparkIndex].y = bossY;
 
-								sparks[laserSparkIndex].velocityX = cosf(sparkAngle) * particleSpeed;
-								sparks[laserSparkIndex].velocityY = sinf(sparkAngle) * particleSpeed;
+								sparks[laserSparkIndex].velocityX =
+									static_cast<float>(rand() % 160 - 80) / 10.0f;
+
+								sparks[laserSparkIndex].velocityY =
+									static_cast<float>(rand() % 160 - 80) / 10.0f;
 
 								sparks[laserSparkIndex].life = 40;
 								sparks[laserSparkIndex].isExist = 1;
-
 								break;
 							}
 						}
