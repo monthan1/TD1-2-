@@ -157,6 +157,30 @@ struct GlitchParticle
 	int isExist;
 };
 
+// ステージの敵データ構造体（赤＝野生、青＝仲間）
+struct StageEnemy
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int wanderTimer;
+	int flash;
+	int shootTimer;
+	int isAlly;
+	int isExist;
+};
+
+// 仲間の弾構造体
+struct AllyBullet
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int isExist;
+};
+
 // 残像の共通描画処理
 void DrawAfterImage(float x, float y, float radius, int life, int maxLife, unsigned int baseColor)
 {
@@ -373,6 +397,132 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	int attackType = 1;
 
+	// ステージ（ボス戦前）の設定
+	const int kSceneStage = 0;
+	const int kSceneBoss = 1;
+	int scene = kSceneStage;
+
+	// ステージのプレイヤー
+	float stagePlayerX = 960.0f;
+	float stagePlayerY = 1000.0f;
+	const float kStageSpeed = 8.0f;
+
+	// 扉の設定
+	const float kDoorX = 960.0f;
+	const float kDoorY = 170.0f;
+	const float kDoorWidth = 160.0f;
+	const float kDoorHeight = 220.0f;
+
+	// 敵（野生＝赤、仲間＝青）の設定
+	const int kMaxStageEnemies = 200;
+	const float kStageEnemyRadius = 12.0f;
+	StageEnemy stageEnemies[kMaxStageEnemies] = {};
+	int allyCount = 0;
+
+	// 呼びかけ（仲間を集める波）の設定
+	const int kCallFrames = 20;
+	const float kCallStartRadius = 30.0f;
+	const float kCallSpeed = 14.0f;
+	const int kCallCooldownMax = 30;
+	int callTimer = 0;
+	int callCooldown = 0;
+	float callRadius = 0.0f;
+
+	// 仲間がプレイヤーの後ろに群れでついてくる設定（ピクミン風）
+	const float kFlockSpacing = 18.0f;      // 群れの密度（小さいほどぎゅっと集まる）
+	const float kFlockGap = 45.0f;          // プレイヤーと群れの間の距離
+	float behindDirX = 0.0f;                // 「後ろ」の向き（プレイヤーの進行方向の逆）
+	float behindDirY = 1.0f;
+	float prevFollowX = 0.0f;
+	float prevFollowY = 0.0f;
+	int followTimer = 0;
+
+	// 後ろの向きをリセットする
+	auto resetFollow = [&](float x, float y) {
+		behindDirX = 0.0f;
+		behindDirY = 1.0f;
+		prevFollowX = x;
+		prevFollowY = y;
+		};
+
+	// プレイヤーの動きから「後ろ」の向きをゆっくり更新する
+	auto updateBehindDir = [&](float x, float y) {
+		float moveDx = x - prevFollowX;
+		float moveDy = y - prevFollowY;
+		float moveLen = sqrtf(moveDx * moveDx + moveDy * moveDy);
+
+		prevFollowX = x;
+		prevFollowY = y;
+		followTimer++;
+
+		if (moveLen > 0.5f) {
+			behindDirX += (-moveDx / moveLen - behindDirX) * 0.08f;
+			behindDirY += (-moveDy / moveLen - behindDirY) * 0.08f;
+
+			float dirLen = sqrtf(behindDirX * behindDirX + behindDirY * behindDirY);
+
+			if (dirLen > 0.001f) {
+				behindDirX /= dirLen;
+				behindDirY /= dirLen;
+			}
+			else {
+				behindDirX = 0.0f;
+				behindDirY = 1.0f;
+			}
+		}
+		};
+
+	// 仲間 index 番目の「群れの中の定位置」（プレイヤーの後ろのかたまり）
+	auto getAllySlot = [&](int index, int total, float playerPosX, float playerPosY, float& slotOutX, float& slotOutY) {
+		float maxRadius = kFlockSpacing * sqrtf((float)(total > 1 ? total : 1));
+
+		// 群れの中心はプレイヤーの後ろ
+		float centerX = playerPosX + behindDirX * (kFlockGap + maxRadius);
+		float centerY = playerPosY + behindDirY * (kFlockGap + maxRadius);
+
+		// ひまわり状に敷き詰める（人数が増えても密度が一定）
+		float angle = (float)index * 2.39996f;
+		float radius = kFlockSpacing * sqrtf((float)index + 0.5f);
+
+		// ちょっとふらふらさせてゆるい感じにする
+		float wobbleX = sinf((float)followTimer * 0.07f + (float)index * 1.7f) * 4.0f;
+		float wobbleY = cosf((float)followTimer * 0.06f + (float)index * 2.3f) * 4.0f;
+
+		slotOutX = centerX + cosf(angle) * radius + wobbleX;
+		slotOutY = centerY + sinf(angle) * radius + wobbleY;
+		};
+
+	// 仲間ごとに追いかける速さを少しずつ変える（遅れてついてくる子がいる）
+	auto getAllyFollowRate = [&](int index) {
+		return 0.07f + (float)(index % 5) * 0.012f;
+		};
+
+	// 仲間の弾の設定
+	const int kMaxAllyBullets = 64;
+	AllyBullet allyBullets[kMaxAllyBullets] = {};
+	const float kAllyBulletSpeed = 18.0f;
+
+	for (int allyBulletInitIndex = 0; allyBulletInitIndex < kMaxAllyBullets; allyBulletInitIndex++) {
+		allyBullets[allyBulletInitIndex].isExist = 0;
+	}
+
+	// ステージの敵の初期化
+	for (int stageEnemyInitIndex = 0; stageEnemyInitIndex < kMaxStageEnemies; stageEnemyInitIndex++) {
+
+		stageEnemies[stageEnemyInitIndex].x = 100.0f + (float)(rand() % 1720);
+		stageEnemies[stageEnemyInitIndex].y = 400.0f + (float)(rand() % 500);
+		stageEnemies[stageEnemyInitIndex].velocityX = 0.0f;
+		stageEnemies[stageEnemyInitIndex].velocityY = 0.0f;
+		stageEnemies[stageEnemyInitIndex].wanderTimer = rand() % 60;
+		stageEnemies[stageEnemyInitIndex].flash = 0;
+		stageEnemies[stageEnemyInitIndex].shootTimer = 0;
+		stageEnemies[stageEnemyInitIndex].isAlly = 0;
+		stageEnemies[stageEnemyInitIndex].isExist = 1;
+	}
+
+	// 後ろの向きの初期化
+	resetFollow(stagePlayerX, stagePlayerY);
+
 	// ウィンドウの×ボタンが押されるまでループ
 	while (Novice::ProcessMessage() == 0) {
 
@@ -404,11 +554,374 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		memcpy(preKeys, keys, 256);
 		Novice::GetHitKeyStateAll(keys);
 
+		// ==============================
+		// ステージ（ボス戦前）の処理
+		// ==============================
+		if (scene == kSceneStage) {
+
+			// --- 更新処理 ---
+
+			// 入力方向
+			float stageMoveX = Controller::GetLeftStickX();
+			float stageMoveY = Controller::GetLeftStickY();
+
+			if (Controller::IsDown(kPadButton0)) stageMoveY -= 1.0f;
+			if (Controller::IsDown(kPadButton1)) stageMoveY += 1.0f;
+			if (Controller::IsDown(kPadButton2)) stageMoveX -= 1.0f;
+			if (Controller::IsDown(kPadButton3)) stageMoveX += 1.0f;
+
+			if (keys[DIK_W]) stageMoveY -= 1.0f;
+			if (keys[DIK_S]) stageMoveY += 1.0f;
+			if (keys[DIK_A]) stageMoveX -= 1.0f;
+			if (keys[DIK_D]) stageMoveX += 1.0f;
+
+			// プレイヤーの移動
+			float stageMoveLength = sqrtf(stageMoveX * stageMoveX + stageMoveY * stageMoveY);
+
+			if (stageMoveLength > 0.0f) {
+				stagePlayerX += (stageMoveX / stageMoveLength) * kStageSpeed;
+				stagePlayerY += (stageMoveY / stageMoveLength) * kStageSpeed;
+			}
+
+			// 画面外に出ないようにする
+			if (stagePlayerX < playerRadius) stagePlayerX = playerRadius;
+			if (stagePlayerX > 1920.0f - playerRadius) stagePlayerX = 1920.0f - playerRadius;
+			if (stagePlayerY < playerRadius) stagePlayerY = playerRadius;
+			if (stagePlayerY > 1180.0f - playerRadius) stagePlayerY = 1180.0f - playerRadius;
+
+			// プレイヤーの「後ろ」の向きを更新する
+			updateBehindDir(stagePlayerX, stagePlayerY);
+
+			// 呼びかけのクールダウン
+			if (callCooldown > 0) {
+				callCooldown--;
+			}
+
+			// 呼びかけ（SPACEキー）
+			if ((Controller::IsPressed(kPadButton10) ||
+				(keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
+				callTimer == 0 && callCooldown == 0) {
+
+				callTimer = kCallFrames;
+				callRadius = kCallStartRadius;
+				callCooldown = kCallCooldownMax;
+			}
+
+			// 呼びかけの波を広げる
+			if (callTimer > 0) {
+				callTimer--;
+				callRadius += kCallSpeed;
+			}
+
+			// 敵の更新
+			int allyIndex = 0;
+			allyCount = 0;
+
+			int stageAllyTotal = 0;
+
+			for (int stageAllyCountIndex = 0; stageAllyCountIndex < kMaxStageEnemies; stageAllyCountIndex++) {
+				if (stageEnemies[stageAllyCountIndex].isExist && stageEnemies[stageAllyCountIndex].isAlly) {
+					stageAllyTotal++;
+				}
+			}
+
+			for (int stageEnemyUpdateIndex = 0;
+				stageEnemyUpdateIndex < kMaxStageEnemies;
+				stageEnemyUpdateIndex++) {
+
+				if (!stageEnemies[stageEnemyUpdateIndex].isExist) {
+					continue;
+				}
+
+				if (stageEnemies[stageEnemyUpdateIndex].flash > 0) {
+					stageEnemies[stageEnemyUpdateIndex].flash--;
+				}
+
+				// 野生の敵（赤）の処理
+				if (!stageEnemies[stageEnemyUpdateIndex].isAlly) {
+
+					// 呼びかけの波に触れたら仲間（青）になる
+					if (callTimer > 0) {
+
+						float callDx = stageEnemies[stageEnemyUpdateIndex].x - stagePlayerX;
+						float callDy = stageEnemies[stageEnemyUpdateIndex].y - stagePlayerY;
+
+						if (callDx * callDx + callDy * callDy <= callRadius * callRadius) {
+							stageEnemies[stageEnemyUpdateIndex].isAlly = 1;
+							stageEnemies[stageEnemyUpdateIndex].flash = 12;
+						}
+					}
+
+					// ふらふら歩き回る
+					stageEnemies[stageEnemyUpdateIndex].wanderTimer--;
+
+					if (stageEnemies[stageEnemyUpdateIndex].wanderTimer <= 0) {
+
+						stageEnemies[stageEnemyUpdateIndex].wanderTimer = 60 + rand() % 90;
+
+						if (rand() % 3 == 0) {
+							stageEnemies[stageEnemyUpdateIndex].velocityX = 0.0f;
+							stageEnemies[stageEnemyUpdateIndex].velocityY = 0.0f;
+						}
+						else {
+							float wanderAngle = (float)(rand() % 628) / 100.0f;
+							float wanderSpeed = 0.8f + (float)(rand() % 15) / 10.0f;
+
+							stageEnemies[stageEnemyUpdateIndex].velocityX = cosf(wanderAngle) * wanderSpeed;
+							stageEnemies[stageEnemyUpdateIndex].velocityY = sinf(wanderAngle) * wanderSpeed;
+						}
+					}
+
+					stageEnemies[stageEnemyUpdateIndex].x += stageEnemies[stageEnemyUpdateIndex].velocityX;
+					stageEnemies[stageEnemyUpdateIndex].y += stageEnemies[stageEnemyUpdateIndex].velocityY;
+
+					// 歩ける範囲から出たら跳ね返る
+					if (stageEnemies[stageEnemyUpdateIndex].x < 30.0f ||
+						stageEnemies[stageEnemyUpdateIndex].x > 1890.0f) {
+						stageEnemies[stageEnemyUpdateIndex].velocityX *= -1.0f;
+					}
+
+					if (stageEnemies[stageEnemyUpdateIndex].y < 330.0f ||
+						stageEnemies[stageEnemyUpdateIndex].y > 1150.0f) {
+						stageEnemies[stageEnemyUpdateIndex].velocityY *= -1.0f;
+					}
+
+					if (stageEnemies[stageEnemyUpdateIndex].x < 30.0f) stageEnemies[stageEnemyUpdateIndex].x = 30.0f;
+					if (stageEnemies[stageEnemyUpdateIndex].x > 1890.0f) stageEnemies[stageEnemyUpdateIndex].x = 1890.0f;
+					if (stageEnemies[stageEnemyUpdateIndex].y < 330.0f) stageEnemies[stageEnemyUpdateIndex].y = 330.0f;
+					if (stageEnemies[stageEnemyUpdateIndex].y > 1150.0f) stageEnemies[stageEnemyUpdateIndex].y = 1150.0f;
+				}
+				// 仲間（青）の処理
+				else {
+
+					// プレイヤーの後ろの群れの中の定位置を決める
+					float slotX = 0.0f;
+					float slotY = 0.0f;
+					getAllySlot(allyIndex, stageAllyTotal, stagePlayerX, stagePlayerY, slotX, slotY);
+
+					// 定位置に向かってついていく
+					float followRate = getAllyFollowRate(allyIndex);
+					float followX = (slotX - stageEnemies[stageEnemyUpdateIndex].x) * followRate;
+					float followY = (slotY - stageEnemies[stageEnemyUpdateIndex].y) * followRate;
+
+					float followLength = sqrtf(followX * followX + followY * followY);
+
+					if (followLength > 16.0f) {
+						followX = followX / followLength * 16.0f;
+						followY = followY / followLength * 16.0f;
+					}
+
+					stageEnemies[stageEnemyUpdateIndex].x += followX;
+					stageEnemies[stageEnemyUpdateIndex].y += followY;
+
+					allyIndex++;
+					allyCount++;
+				}
+			}
+
+			// 扉に入ったらボス戦へ
+			if (stagePlayerX > kDoorX - kDoorWidth / 2.0f &&
+				stagePlayerX < kDoorX + kDoorWidth / 2.0f &&
+				stagePlayerY > kDoorY - kDoorHeight / 2.0f &&
+				stagePlayerY < kDoorY + kDoorHeight / 2.0f) {
+
+				scene = kSceneBoss;
+
+				// 仲間をボス戦のプレイヤーの後ろに並べる
+				resetFollow(playerX, playerY);
+				int bossAllyIndex = 0;
+				int bossAllyTotal = 0;
+
+				for (int bossAllyCountIndex = 0; bossAllyCountIndex < kMaxStageEnemies; bossAllyCountIndex++) {
+					if (stageEnemies[bossAllyCountIndex].isExist && stageEnemies[bossAllyCountIndex].isAlly) {
+						bossAllyTotal++;
+					}
+				}
+
+				for (int bossAllySetIndex = 0; bossAllySetIndex < kMaxStageEnemies; bossAllySetIndex++) {
+
+					if (stageEnemies[bossAllySetIndex].isExist && stageEnemies[bossAllySetIndex].isAlly) {
+
+						float bossSlotX = 0.0f;
+						float bossSlotY = 0.0f;
+						getAllySlot(bossAllyIndex, bossAllyTotal, playerX, playerY, bossSlotX, bossSlotY);
+
+						stageEnemies[bossAllySetIndex].x = bossSlotX;
+						stageEnemies[bossAllySetIndex].y = bossSlotY;
+						stageEnemies[bossAllySetIndex].shootTimer = 20 + rand() % 60;
+
+						bossAllyIndex++;
+					}
+				}
+			}
+
+			// --- 描画処理 ---
+
+			// 地面
+			Novice::DrawBox(0, 0, 1920, 1180, 0, 0x14201AFF, kFillModeSolid);
+
+			// 扉の光（プレイヤーが近づくと明るくなる）
+			float doorDx = stagePlayerX - kDoorX;
+			float doorDy = stagePlayerY - kDoorY;
+			unsigned int doorInnerColor = 0x1A0F05FF;
+
+			if (doorDx * doorDx + doorDy * doorDy < 350.0f * 350.0f) {
+				doorInnerColor = 0xFFD27AFF;
+			}
+
+			// 扉の枠
+			Novice::DrawBox(
+				(int)(kDoorX - kDoorWidth / 2.0f - 14.0f),
+				(int)(kDoorY - kDoorHeight / 2.0f - 14.0f),
+				(int)(kDoorWidth + 28.0f),
+				(int)(kDoorHeight + 14.0f),
+				0.0f,
+				0x8B5A2BFF,
+				kFillModeSolid
+			);
+
+			// 扉の内側
+			Novice::DrawBox(
+				(int)(kDoorX - kDoorWidth / 2.0f),
+				(int)(kDoorY - kDoorHeight / 2.0f),
+				(int)kDoorWidth,
+				(int)kDoorHeight,
+				0.0f,
+				doorInnerColor,
+				kFillModeSolid
+			);
+
+			// 扉のドアノブ
+			Novice::DrawEllipse(
+				(int)(kDoorX + kDoorWidth / 2.0f - 22.0f),
+				(int)kDoorY,
+				7,
+				7,
+				0.0f,
+				0xFFD700FF,
+				kFillModeSolid
+			);
+
+			// 呼びかけの波
+			if (callTimer > 0) {
+
+				Novice::DrawEllipse(
+					(int)stagePlayerX,
+					(int)stagePlayerY,
+					(int)callRadius,
+					(int)callRadius,
+					0.0f,
+					0x66AAFFFF,
+					kFillModeWireFrame
+				);
+
+				Novice::DrawEllipse(
+					(int)stagePlayerX,
+					(int)stagePlayerY,
+					(int)(callRadius * 0.9f),
+					(int)(callRadius * 0.9f),
+					0.0f,
+					0x3366FF88,
+					kFillModeWireFrame
+				);
+			}
+
+			// 敵の描画（野生＝赤、仲間＝青）
+			for (int stageEnemyDrawIndex = 0;
+				stageEnemyDrawIndex < kMaxStageEnemies;
+				stageEnemyDrawIndex++) {
+
+				if (!stageEnemies[stageEnemyDrawIndex].isExist) {
+					continue;
+				}
+
+				unsigned int enemyColor = 0xFF2222FF;
+				unsigned int enemyRimColor = 0x990000FF;
+
+				if (stageEnemies[stageEnemyDrawIndex].isAlly) {
+					enemyColor = 0x3366FFFF;
+					enemyRimColor = 0x112299FF;
+				}
+
+				// 縁
+				Novice::DrawEllipse(
+					(int)stageEnemies[stageEnemyDrawIndex].x,
+					(int)stageEnemies[stageEnemyDrawIndex].y,
+					(int)kStageEnemyRadius + 3,
+					(int)kStageEnemyRadius + 3,
+					0.0f,
+					enemyRimColor,
+					kFillModeSolid
+				);
+
+				// 本体
+				Novice::DrawEllipse(
+					(int)stageEnemies[stageEnemyDrawIndex].x,
+					(int)stageEnemies[stageEnemyDrawIndex].y,
+					(int)kStageEnemyRadius,
+					(int)kStageEnemyRadius,
+					0.0f,
+					enemyColor,
+					kFillModeSolid
+				);
+
+				// 仲間になった瞬間の光
+				if (stageEnemies[stageEnemyDrawIndex].flash > 0) {
+					Novice::DrawEllipse(
+						(int)stageEnemies[stageEnemyDrawIndex].x,
+						(int)stageEnemies[stageEnemyDrawIndex].y,
+						(int)kStageEnemyRadius + 6 + stageEnemies[stageEnemyDrawIndex].flash * 2,
+						(int)kStageEnemyRadius + 6 + stageEnemies[stageEnemyDrawIndex].flash * 2,
+						0.0f,
+						WHITE,
+						kFillModeWireFrame
+					);
+				}
+			}
+
+			// プレイヤーの描画
+			Novice::DrawSprite(
+				(int)(stagePlayerX - 52),
+				(int)(stagePlayerY - 50),
+				bokasiTexture,
+				0.15f,
+				0.15f,
+				0.0f,
+				0x330033FF
+			);
+
+			Novice::DrawSprite(
+				(int)(stagePlayerX - 32),
+				(int)(stagePlayerY - 32),
+				hosiTexture,
+				1.0f,
+				1.0f,
+				0.0f,
+				WHITE
+			);
+
+			// UI表示
+			Novice::ScreenPrintf(10, 10, "Move : WASD");
+			Novice::ScreenPrintf(10, 30, "Call : SPACE (red -> blue)");
+			Novice::ScreenPrintf(10, 50, "Allies : %d / %d", allyCount, kMaxStageEnemies);
+			Novice::ScreenPrintf(10, 70, "Enter the door to fight the boss");
+
+			// フレームの終了
+			Novice::EndFrame();
+
+			// ESCキーが押されたらループを抜ける
+			if (preKeys[DIK_ESCAPE] == 0 && keys[DIK_ESCAPE] != 0) {
+				break;
+			}
+
+			continue;
+		}
+
 		///
 		/// ↓更新処理ここから
 		///
 
-		// --- 1. ボスの移動・突進処理 ---
+		// ボスの移動・突進処理 
 
 		if (bossState == 0) {
 
@@ -685,6 +1198,137 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					playerX += (moveX / len) * speed;
 					playerY += (moveY / len) * speed;
 				}
+			}
+		}
+
+		// プレイヤーの「後ろ」の向きを更新する
+		updateBehindDir(playerX, playerY);
+
+		int bossAllyTotalNow = 0;
+
+		for (int bossAllyTotalIndex = 0; bossAllyTotalIndex < kMaxStageEnemies; bossAllyTotalIndex++) {
+			if (stageEnemies[bossAllyTotalIndex].isExist && stageEnemies[bossAllyTotalIndex].isAlly) {
+				bossAllyTotalNow++;
+			}
+		}
+
+		// 仲間の更新処理（プレイヤーの後ろについていき、ボスに向かって弾を撃つ）
+		int bossAllyUpdateIndex = 0;
+
+		for (int allyUpdateIndex = 0; allyUpdateIndex < kMaxStageEnemies; allyUpdateIndex++) {
+
+			if (!stageEnemies[allyUpdateIndex].isExist || !stageEnemies[allyUpdateIndex].isAlly) {
+				continue;
+			}
+
+			// プレイヤーの後ろの群れの定位置に向かってついていく
+			float allySlotX = 0.0f;
+			float allySlotY = 0.0f;
+			getAllySlot(bossAllyUpdateIndex, bossAllyTotalNow, playerX, playerY, allySlotX, allySlotY);
+
+			float allyFollowRate = getAllyFollowRate(bossAllyUpdateIndex);
+			float allyFollowX = (allySlotX - stageEnemies[allyUpdateIndex].x) * allyFollowRate;
+			float allyFollowY = (allySlotY - stageEnemies[allyUpdateIndex].y) * allyFollowRate;
+
+			float allyFollowLength = sqrtf(allyFollowX * allyFollowX + allyFollowY * allyFollowY);
+
+			if (allyFollowLength > 16.0f) {
+				allyFollowX = allyFollowX / allyFollowLength * 16.0f;
+				allyFollowY = allyFollowY / allyFollowLength * 16.0f;
+			}
+
+			stageEnemies[allyUpdateIndex].x += allyFollowX;
+			stageEnemies[allyUpdateIndex].y += allyFollowY;
+
+			// 弾を撃つタイマー
+			stageEnemies[allyUpdateIndex].shootTimer--;
+
+			if (stageEnemies[allyUpdateIndex].shootTimer <= 0) {
+
+				stageEnemies[allyUpdateIndex].shootTimer = 50 + rand() % 40;
+
+				for (int allyBulletSpawnIndex = 0; allyBulletSpawnIndex < kMaxAllyBullets; allyBulletSpawnIndex++) {
+
+					if (!allyBullets[allyBulletSpawnIndex].isExist) {
+
+						float shootDx = bossX - stageEnemies[allyUpdateIndex].x;
+						float shootDy = bossY - stageEnemies[allyUpdateIndex].y;
+						float shootLength = sqrtf(shootDx * shootDx + shootDy * shootDy);
+
+						if (shootLength > 0.0f) {
+							allyBullets[allyBulletSpawnIndex].x = stageEnemies[allyUpdateIndex].x;
+							allyBullets[allyBulletSpawnIndex].y = stageEnemies[allyUpdateIndex].y;
+							allyBullets[allyBulletSpawnIndex].velocityX = shootDx / shootLength * kAllyBulletSpeed;
+							allyBullets[allyBulletSpawnIndex].velocityY = shootDy / shootLength * kAllyBulletSpeed;
+							allyBullets[allyBulletSpawnIndex].isExist = 1;
+						}
+
+						break;
+					}
+				}
+			}
+
+			bossAllyUpdateIndex++;
+		}
+
+		// 仲間の弾の更新処理（ボスに向かって少し曲がる）
+		for (int allyBulletUpdateIndex = 0; allyBulletUpdateIndex < kMaxAllyBullets; allyBulletUpdateIndex++) {
+
+			if (!allyBullets[allyBulletUpdateIndex].isExist) {
+				continue;
+			}
+
+			float bulletDx = bossX - allyBullets[allyBulletUpdateIndex].x;
+			float bulletDy = bossY - allyBullets[allyBulletUpdateIndex].y;
+			float bulletLength = sqrtf(bulletDx * bulletDx + bulletDy * bulletDy);
+
+			if (bulletLength > 0.0f) {
+
+				float turnX = allyBullets[allyBulletUpdateIndex].velocityX + bulletDx / bulletLength * kAllyBulletSpeed * 0.25f;
+				float turnY = allyBullets[allyBulletUpdateIndex].velocityY + bulletDy / bulletLength * kAllyBulletSpeed * 0.25f;
+				float turnLength = sqrtf(turnX * turnX + turnY * turnY);
+
+				if (turnLength > 0.0f) {
+					allyBullets[allyBulletUpdateIndex].velocityX = turnX / turnLength * kAllyBulletSpeed;
+					allyBullets[allyBulletUpdateIndex].velocityY = turnY / turnLength * kAllyBulletSpeed;
+				}
+			}
+
+			allyBullets[allyBulletUpdateIndex].x += allyBullets[allyBulletUpdateIndex].velocityX;
+			allyBullets[allyBulletUpdateIndex].y += allyBullets[allyBulletUpdateIndex].velocityY;
+
+			// ボスに当たったら火花を出して消える
+			float hitDx = bossX - allyBullets[allyBulletUpdateIndex].x;
+			float hitDy = bossY - allyBullets[allyBulletUpdateIndex].y;
+
+			if (hitDx * hitDx + hitDy * hitDy < (bossRadius + 8.0f) * (bossRadius + 8.0f)) {
+
+				allyBullets[allyBulletUpdateIndex].isExist = 0;
+				screenShakeTimer = 2;
+
+				for (int allySparkCount = 0; allySparkCount < 6; allySparkCount++) {
+
+					for (int allySparkIndex = 0; allySparkIndex < kMaxSparks; allySparkIndex++) {
+
+						if (!sparks[allySparkIndex].isExist) {
+
+							sparks[allySparkIndex].x = allyBullets[allyBulletUpdateIndex].x;
+							sparks[allySparkIndex].y = allyBullets[allyBulletUpdateIndex].y;
+							sparks[allySparkIndex].velocityX = static_cast<float>(rand() % 100 - 50) / 10.0f;
+							sparks[allySparkIndex].velocityY = static_cast<float>(rand() % 100 - 50) / 10.0f;
+							sparks[allySparkIndex].life = 20;
+							sparks[allySparkIndex].isExist = 1;
+
+							break;
+						}
+					}
+				}
+			}
+			// 画面外に出たら消す
+			else if (allyBullets[allyBulletUpdateIndex].x < -50 || allyBullets[allyBulletUpdateIndex].x > 1970 ||
+				allyBullets[allyBulletUpdateIndex].y < -50 || allyBullets[allyBulletUpdateIndex].y > 1230) {
+
+				allyBullets[allyBulletUpdateIndex].isExist = 0;
 			}
 		}
 
@@ -1310,10 +1954,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 		/// ↓描画処理ここから
 		///
-
-		// =========================
-		// 描画処理
-		// =========================
 
 		Novice::DrawBox(0, 0, 1920, 1180, 0, BLACK, kFillModeSolid);
 
@@ -1963,6 +2603,70 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 仲間の弾の描画
+		for (int allyBulletDrawIndex = 0; allyBulletDrawIndex < kMaxAllyBullets; allyBulletDrawIndex++) {
+
+			if (allyBullets[allyBulletDrawIndex].isExist) {
+
+				// 弾の後ろに伸びる光
+				Novice::DrawLine(
+					(int)(allyBullets[allyBulletDrawIndex].x - allyBullets[allyBulletDrawIndex].velocityX * 1.2f) + screenShakeX,
+					(int)(allyBullets[allyBulletDrawIndex].y - allyBullets[allyBulletDrawIndex].velocityY * 1.2f) + screenShakeY,
+					(int)allyBullets[allyBulletDrawIndex].x + screenShakeX,
+					(int)allyBullets[allyBulletDrawIndex].y + screenShakeY,
+					0x66AAFFFF
+				);
+
+				// 弾の本体
+				Novice::DrawEllipse(
+					(int)allyBullets[allyBulletDrawIndex].x + screenShakeX,
+					(int)allyBullets[allyBulletDrawIndex].y + screenShakeY,
+					7,
+					7,
+					0.0f,
+					0x3366FFFF,
+					kFillModeSolid
+				);
+
+				Novice::DrawEllipse(
+					(int)allyBullets[allyBulletDrawIndex].x + screenShakeX,
+					(int)allyBullets[allyBulletDrawIndex].y + screenShakeY,
+					3,
+					3,
+					0.0f,
+					WHITE,
+					kFillModeSolid
+				);
+			}
+		}
+
+		// 仲間（青）の描画
+		for (int allyDrawIndex = 0; allyDrawIndex < kMaxStageEnemies; allyDrawIndex++) {
+
+			if (stageEnemies[allyDrawIndex].isExist && stageEnemies[allyDrawIndex].isAlly) {
+
+				Novice::DrawEllipse(
+					(int)stageEnemies[allyDrawIndex].x + screenShakeX,
+					(int)stageEnemies[allyDrawIndex].y + screenShakeY,
+					(int)kStageEnemyRadius + 3,
+					(int)kStageEnemyRadius + 3,
+					0.0f,
+					0x112299FF,
+					kFillModeSolid
+				);
+
+				Novice::DrawEllipse(
+					(int)stageEnemies[allyDrawIndex].x + screenShakeX,
+					(int)stageEnemies[allyDrawIndex].y + screenShakeY,
+					(int)kStageEnemyRadius,
+					(int)kStageEnemyRadius,
+					0.0f,
+					0x3366FFFF,
+					kFillModeSolid
+				);
+			}
+		}
+
 		// プレイヤーの描画
 		Novice::DrawSprite(
 			(int)(playerX - 52) + screenShakeX,
@@ -2040,6 +2744,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Novice::ScreenPrintf(10, 70, "Attack : 2 - Laser");
 		}
 		Novice::ScreenPrintf(50, 90, "Current Frame : %d", currentFrame);
+		Novice::ScreenPrintf(10, 110, "Allies : %d", allyCount);
+
 		///
 		/// ↑描画処理ここまで
 		///
