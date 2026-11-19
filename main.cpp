@@ -195,9 +195,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// キー入力結果を受け取る箱
 	char keys[256] = { 0 };
 	char preKeys[256] = { 0 };
-	
+
 	int bokasiTexture = Novice::LoadTexture("./Resources/bokasi.png");
 	int hosiTexture = Novice::LoadTexture("./Resources/hikarin.png");
+	int bakuhatuTexture = Novice::LoadTexture("./Resources/bakuhatu.png");
+
+	// 爆発画像の拡大率
+	const float kExplosionScale = 2.5f;
+	const int kExplosionHalfSize = (int)(62.0f * kExplosionScale);
 
 	// ボスのデータ
 	float bossX = 960.0f;
@@ -421,7 +426,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				bossAttackTimer = 45;
 			}
 		}
-		
+
 		else if (bossState == 1) {
 
 			bossAttackTimer--;
@@ -1638,205 +1643,35 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 					int flash = bombs[bombDrawIndex].timer / 5 % 2;
 
-					// 爆弾の外側
-					Novice::DrawEllipse(
-						(int)x,
-						(int)y,
-						23,
-						23,
-						0.0f,
-						0x555555FF,
-						kFillModeSolid
-					);
+					// 爆弾の膨張率を計算
+					float expandRatio = 0.0f;
+					if (!bombs[bombDrawIndex].isGlitch) {
+						expandRatio = (45.0f - (float)bombs[bombDrawIndex].timer) / 45.0f;
+					}
+					if (expandRatio < 0.0f) expandRatio = 0.0f;
+					if (expandRatio > 1.0f) expandRatio = 1.0f;
+
+					float bombRadius = 18.0f + expandRatio * 11.0f;
 
 					// 爆弾の本体
 					Novice::DrawEllipse(
 						(int)x,
 						(int)y,
-						18,
-						18,
+						(int)bombRadius,
+						(int)bombRadius,
 						0.0f,
 						0x171717FF,
 						kFillModeSolid
 					);
 
-					// ひび割れ
-					Novice::DrawLine(
-						(int)x - 13, (int)y - 10,
-						(int)x - 4, (int)y - 3,
-						0xFF5500FF
-					);
-
-					Novice::DrawLine(
-						(int)x - 4, (int)y - 3,
-						(int)x + 2, (int)y - 11,
-						0xFFAA00FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 2, (int)y - 11,
-						(int)x + 7, (int)y - 3,
-						0xFF5500FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 7, (int)y - 3,
-						(int)x + 1, (int)y + 5,
-						0xFFAA00FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 1, (int)y + 5,
-						(int)x + 9, (int)y + 12,
-						0xFF5500FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 1, (int)y + 5,
-						(int)x - 9, (int)y + 11,
-						0xFFAA00FF
-					);
-
-					// ひびの先端から飛び出す光
-					float lightLength = 22.0f;
-
-					if (flash == 0) {
-						lightLength = 38.0f;
-					}
-
-					// 左上のひびから出る光
-					Novice::DrawLine(
-						(int)x - 4,
-						(int)y - 3,
-						(int)((int)x - 4 - (int)lightLength * 0.5f),
-						(int)y - 3 - (int)lightLength,
-						WHITE
-					);
-
-					Novice::DrawLine(
-						(int)x - 4,
-						(int)y - 3,
-						(int)x - 4 - (int)lightLength,
-						(int)y - 3 - (int)lightLength,
-						0xFFAA00FF
-					);
-
-					Novice::DrawLine(
-						(int)x - 4,
-						(int)y - 3,
-						(int)(x - 4 - lightLength * 0.8f),
-						(int)(y - 3 - lightLength * 0.35f),
-						0xFF6600FF
-					);
-
-					// 右上のひびから出る光jya
-					Novice::DrawLine(
-						(int)x + 7,
-						(int)y - 3,
-						(int)x + 7 + (int)lightLength,
-						(int)y - 3 - (int)lightLength,
-						WHITE
-					);
-
-					Novice::DrawLine(
-						(int)x + 7,
-						(int)y - 3,
-						(int)x + 7 + (int)lightLength,
-						(int)((int)y - 3 - (int)lightLength * 0.4f),
-						0xFFAA00FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 7,
-						(int)y - 3,
-						(int)(x + 7 + lightLength * 0.4f),
-						(int)(y - 3 - lightLength * 0.85f),
-						0xFF6600FF
-					);
-
-					// 下側のひびから出る光
-					Novice::DrawLine(
-						(int)x + 1,
-						(int)y + 5,
-						(int)x + 1 + (int)lightLength,
-						(int)y + 5 + (int)lightLength,
-						WHITE
-					);
-
-					Novice::DrawLine(
-						(int)x + 1,
-						(int)y + 5,
-						(int)((int)x - (int)lightLength * 0.3f),
-						(int)y + 5 + (int)lightLength,
-						0xFFAA00FF
-					);
-
-					Novice::DrawLine(
-						(int)x + 1,
-						(int)y + 5,
-						(int)(x + 1 + lightLength * 0.8f),
-						(int)(y + 5 + lightLength * 0.45f),
-						0xFF6600FF
-					);
-
-					int lightSize = 2;
-					if (flash == 0) {
-						lightSize = 4;
-					}
-
-					Novice::DrawEllipse(
-						(int)(x - 4 - lightLength * 0.5f),
-						(int)(y - 3 - lightLength),
-						lightSize,
-						lightSize,
-						0.0f,
-						WHITE,
-						kFillModeSolid
-					);
-
-					Novice::DrawEllipse(
-						(int)(x + 7 + lightLength),
-						(int)(y - 3 - lightLength),
-						lightSize,
-						lightSize,
-						0.0f,
-						WHITE,
-						kFillModeSolid
-					);
-
-					Novice::DrawEllipse(
-						(int)(x + 1 + lightLength),
-						(int)(y + 5 + lightLength),
-						lightSize,
-						lightSize,
-						0.0f,
-						WHITE,
-						kFillModeSolid
-					);
-
-					// ひびの中心の光
-					int centerLightSize = 5;
-					if (flash == 0) {
-						centerLightSize = 8;
-					}
-
+					// 爆弾の外側の光
 					Novice::DrawEllipse(
 						(int)x,
 						(int)y,
-						centerLightSize,
-						centerLightSize,
+						(int)bombRadius,
+						(int)bombRadius,
 						0.0f,
-						WHITE,
-						kFillModeSolid
-					);
-
-					Novice::DrawEllipse(
-						(int)x,
-						(int)y,
-						13,
-						13,
-						0.0f,
-						0xFF6600FF,
+						flash == 0 ? 0xFF5500FF : 0xAA2200FF,
 						kFillModeWireFrame
 					);
 				}
@@ -1887,40 +1722,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				}
 				else {
 
-					int radius = (int)((25.0f - bombs[bombDrawIndex].life) * 5.0f + 10.0f);
-
-					// 外側の円
-					Novice::DrawEllipse(
-						(int)x,
-						(int)y,
-						radius,
-						radius,
-						0.0f,
-						0xFF4400FF,
-						kFillModeSolid
-					);
-
-					// 中間の円
-					Novice::DrawEllipse(
-						(int)x,
-						(int)y,
-						(int)(radius * 0.7f),
-						(int)(radius * 0.7f),
-						0.0f,
-						0xFFAA00FF,
-						kFillModeSolid
-					);
-
-					// 中心の円
-					Novice::DrawEllipse(
-						(int)x,
-						(int)y,
-						(int)(radius * 0.35f),
-						(int)(radius * 0.35f),
-						0.0f,
-						WHITE,
-						kFillModeSolid
-					);
 				}
 			}
 		}
@@ -1982,6 +1783,38 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			bossColor,
 			kFillModeSolid
 		);
+
+		// ダッシュ爆弾の爆発画像を描画
+		for (int dashBombExplosionDrawIndex = 0;
+			dashBombExplosionDrawIndex < kMaxBombs;
+			dashBombExplosionDrawIndex++) {
+
+			// 爆発している爆弾が存在する場合のみ描画
+			if (bombs[dashBombExplosionDrawIndex].isExist &&
+				bombs[dashBombExplosionDrawIndex].exploded &&
+				!bombs[dashBombExplosionDrawIndex].isGlitch) {
+
+				// 爆発のアニメーションフレームを計算
+				int frame = (25 - bombs[dashBombExplosionDrawIndex].life) * 9 / 25;
+				if (frame < 0) frame = 0;
+				if (frame > 8) frame = 8;
+
+				// 爆発画像の描画
+				Novice::DrawSpriteRect(
+					(int)bombs[dashBombExplosionDrawIndex].x - kExplosionHalfSize + screenShakeX,
+					(int)bombs[dashBombExplosionDrawIndex].y - kExplosionHalfSize + screenShakeY,
+					frame * 124,
+					0,
+					124,
+					124,
+					bakuhatuTexture,
+					(124.0f / 1116.0f) * kExplosionScale,
+					kExplosionScale,
+					0.0f,
+					WHITE
+				);
+			}
+		}
 
 		// ボスの爆発エフェクト描画
 		for (int explosionDrawIndex = 0;
