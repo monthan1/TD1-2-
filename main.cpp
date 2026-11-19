@@ -350,7 +350,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		lasers[boxInitIndex].isShot = 0;
 		lasers[boxInitIndex].length = 0.0f;
-		lasers[boxInitIndex].timer = 0;
+		lasers[boxInitIndex].timer = 100;
 		lasers[boxInitIndex].sparkMade = 0;
 		lasers[boxInitIndex].shakeMade = 0;
 	}
@@ -362,6 +362,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int isAttacking = 0;
 	int attackTimer = 0;
 	int currentAttackIndex = 0;
+	int currentFrame = 0;
+	int isCurrentFrameCount = 0;
 
 	int attackType = 1;
 
@@ -606,6 +608,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			bossAuraAlpha = 0.0f;
 		}
 
+		// currentFrameのカウント
+		if (isCurrentFrameCount)
+		{
+			if (currentFrame < 150)
+			{
+				currentFrame++;
+			} else
+			{
+				currentFrame = 150;
+				isCurrentFrameCount = 0;
+			}
+		}
+
 		// クールダウン
 		if (dashCooldown > 0) {
 			dashCooldown--;
@@ -680,87 +695,74 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		// --- ダッシュ実行 ---
-		if (dashCooldown == 0 && !isAttacking &&
-			(Controller::IsPressed(kPadButton10) ||
-				(keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
-			dashCount < kMaxDashes) {
+		//　ダッシュボタンが押されたとき、ダッシュが最大回数より小さかった時
+		if ((Controller::IsPressed(kPadButton10) ||
+			(keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
+			dashCount < kMaxDashes)
+		{
+	
 
-			float startX = playerX;
-			float startY = playerY;
+			//　ダッシュがクールダウン中ではない時かつ、攻撃中じゃないなら
+			if (dashCooldown <= 0 && !isAttacking)
+			{
+				currentFrame = 0;
+				isCurrentFrameCount = 1;
 
-			float dashDirX = cosf(playerAngle);
-			float dashDirY = sinf(playerAngle);
+				float startX = playerX;
+				float startY = playerY;
 
-			dashStartX = startX;
-			dashStartY = startY;
+				float dashDirX = cosf(playerAngle);
+				float dashDirY = sinf(playerAngle);
 
-			dashTargetX = startX + dashDirX * dashDistance;
-			dashTargetY = startY + dashDirY * dashDistance;
+				dashStartX = startX;
+				dashStartY = startY;
 
-			if (dashTargetX < playerRadius) dashTargetX = playerRadius;
-			if (dashTargetX > 1920.0f - playerRadius) dashTargetX = 1920.0f - playerRadius;
-			if (dashTargetY < playerRadius) dashTargetY = playerRadius;
-			if (dashTargetY > 1180.0f - playerRadius) dashTargetY = 1180.0f - playerRadius;
+				dashTargetX = startX + dashDirX * dashDistance;
+				dashTargetY = startY + dashDirY * dashDistance;
 
-			dashMoveTimer = kDashMoveFrames;
-			dashStunTimer = kDashStunMax;
+				if (dashTargetX < playerRadius) dashTargetX = playerRadius;
+				if (dashTargetX > 1920.0f - playerRadius) dashTargetX = 1920.0f - playerRadius;
+				if (dashTargetY < playerRadius) dashTargetY = playerRadius;
+				if (dashTargetY > 1180.0f - playerRadius) dashTargetY = 1180.0f - playerRadius;
 
-			// プレイヤーの残像を発生させる
-			for (int afterDashIndex = 0; afterDashIndex < kMaxPlayerAfterImages; afterDashIndex++) {
+				dashMoveTimer = kDashMoveFrames;
+				dashStunTimer = kDashStunMax;
 
-				float ratio = (float)afterDashIndex / (kMaxPlayerAfterImages - 1);
+				if (currentFrame<=0)
+				{
+					currentFrame++;
+				}
 
-				afterImages[afterDashIndex].x = dashStartX + (dashTargetX - dashStartX) * ratio;
-				afterImages[afterDashIndex].y = dashStartY + (dashTargetY - dashStartY) * ratio;
+				// プレイヤーの残像を発生させる
+				for (int afterDashIndex = 0; afterDashIndex < kMaxPlayerAfterImages; afterDashIndex++) {
 
-				afterImages[afterDashIndex].startX = afterImages[afterDashIndex].x;
-				afterImages[afterDashIndex].startY = afterImages[afterDashIndex].y;
+					float ratio = (float)afterDashIndex / (kMaxPlayerAfterImages - 1);
 
-				afterImages[afterDashIndex].life = kAfterImageLife;
-				afterImages[afterDashIndex].isExist = 1;
-			}
+					afterImages[afterDashIndex].x = dashStartX + (dashTargetX - dashStartX) * ratio;
+					afterImages[afterDashIndex].y = dashStartY + (dashTargetY - dashStartY) * ratio;
 
-			// メイン砲台
-			if (boxCount < kMaxBoxes) {
-				boxes[boxCount].x = startX;
-				boxes[boxCount].y = startY;
-				boxes[boxCount].width = 12;
-				boxes[boxCount].height = 28;
-				boxes[boxCount].color = 0x88FFFFFF;
-				boxes[boxCount].delay = 0;
+					afterImages[afterDashIndex].startX = afterImages[afterDashIndex].x;
+					afterImages[afterDashIndex].startY = afterImages[afterDashIndex].y;
 
-				// ひし形砲台の生成
-				diamonds[boxCount].x = startX;
-				diamonds[boxCount].y = startY;
+					afterImages[afterDashIndex].life = kAfterImageLife;
+					afterImages[afterDashIndex].isExist = 1;
+				}
 
-				float dx = bossX - startX;
-				float dy = bossY - startY;
-
-				diamonds[boxCount].angle = atan2f(dy, dx);
-				diamonds[boxCount].openSize = 0.0f;
-				diamonds[boxCount].isExist = 1;
-
-				boxes[boxCount].isExist = 1;
-				boxCount++;
-			}
-
-			for (int p = 0; p < 3; p++) {
+				// メイン砲台
 				if (boxCount < kMaxBoxes) {
-
-					float ratio = (float)(p + 1) / 4.0f;
-
-					boxes[boxCount].x = startX + (dashTargetX - startX) * ratio;
-					boxes[boxCount].y = startY + (dashTargetY - startY) * ratio;
+					boxes[boxCount].x = startX;
+					boxes[boxCount].y = startY;
 					boxes[boxCount].width = 12;
 					boxes[boxCount].height = 28;
 					boxes[boxCount].color = 0x88FFFFFF;
-					boxes[boxCount].delay = (p + 1) * 3;
+					boxes[boxCount].delay = 0;
 
-					diamonds[boxCount].x = boxes[boxCount].x;
-					diamonds[boxCount].y = boxes[boxCount].y;
+					// ひし形砲台の生成
+					diamonds[boxCount].x = startX;
+					diamonds[boxCount].y = startY;
 
-					float dx = bossX - boxes[boxCount].x;
-					float dy = bossY - boxes[boxCount].y;
+					float dx = bossX - startX;
+					float dy = bossY - startY;
 
 					diamonds[boxCount].angle = atan2f(dy, dx);
 					diamonds[boxCount].openSize = 0.0f;
@@ -769,40 +771,68 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					boxes[boxCount].isExist = 1;
 					boxCount++;
 				}
+
+				for (int p = 0; p < 3; p++) {
+					if (boxCount < kMaxBoxes) {
+
+						float ratio = (float)(p + 1) / 4.0f;
+
+						boxes[boxCount].x = startX + (dashTargetX - startX) * ratio;
+						boxes[boxCount].y = startY + (dashTargetY - startY) * ratio;
+						boxes[boxCount].width = 12;
+						boxes[boxCount].height = 28;
+						boxes[boxCount].color = 0x88FFFFFF;
+						boxes[boxCount].delay = (p + 1) * 3;
+
+						diamonds[boxCount].x = boxes[boxCount].x;
+						diamonds[boxCount].y = boxes[boxCount].y;
+
+						float dx = bossX - boxes[boxCount].x;
+						float dy = bossY - boxes[boxCount].y;
+
+						diamonds[boxCount].angle = atan2f(dy, dx);
+						diamonds[boxCount].openSize = 0.0f;
+						diamonds[boxCount].isExist = 1;
+
+						boxes[boxCount].isExist = 1;
+						boxCount++;
+					}
+				}
+
+				// 軌道線
+				if (lineCount < kMaxLines) {
+					lines[lineCount].startX = startX;
+					lines[lineCount].startY = startY;
+					lines[lineCount].endX = dashTargetX;
+					lines[lineCount].endY = dashTargetY;
+					lines[lineCount].isExist = 1;
+					lineCount++;
+				}
+
+				dashCount++;
+				dashCooldown = kDashCooldownMax;
+
+				if (dashCount == kMaxDashes) {
+					isAttacking = true;
+					currentAttackIndex = 0;
+					attackTimer = 10;
+
+				}
 			}
 
-			// 軌道線
-			if (lineCount < kMaxLines) {
-				lines[lineCount].startX = startX;
-				lines[lineCount].startY = startY;
-				lines[lineCount].endX = dashTargetX;
-				lines[lineCount].endY = dashTargetY;
-				lines[lineCount].isExist = 1;
-				lineCount++;
-			}
+			// ひし形砲台の向きをボスに合わせる
+			if (dashCount < 4) {
+				for (int diamondAngleIndex = 0;
+					diamondAngleIndex < kMaxBoxes;
+					diamondAngleIndex++) {
 
-			dashCount++;
-			dashCooldown = kDashCooldownMax;
+					if (diamonds[diamondAngleIndex].isExist) {
 
-			if (dashCount == kMaxDashes) {
-				isAttacking = 1;
-				currentAttackIndex = 0;
-				attackTimer = 10;
-			}
-		}
+						float dx = bossX - diamonds[diamondAngleIndex].x;
+						float dy = bossY - diamonds[diamondAngleIndex].y;
 
-		// ひし形砲台の向きをボスに合わせる
-		if (dashCount < 4) {
-			for (int diamondAngleIndex = 0;
-				diamondAngleIndex < kMaxBoxes;
-				diamondAngleIndex++) {
-
-				if (diamonds[diamondAngleIndex].isExist) {
-
-					float dx = bossX - diamonds[diamondAngleIndex].x;
-					float dy = bossY - diamonds[diamondAngleIndex].y;
-
-					diamonds[diamondAngleIndex].angle = atan2f(dy, dx);
+						diamonds[diamondAngleIndex].angle = atan2f(dy, dx);
+					}
 				}
 			}
 		}
@@ -877,7 +907,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 							lasers[currentAttackIndex].length = 0.0f;
 							lasers[currentAttackIndex].maxLength = 2000.0f;
-							lasers[currentAttackIndex].timer = 0;
+							lasers[currentAttackIndex].timer = 100;
 							lasers[currentAttackIndex].isShot = 1;
 							lasers[currentAttackIndex].sparkMade = 0;
 							lasers[currentAttackIndex].shakeMade = 0;
@@ -1169,7 +1199,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		for (int laserUpdateIndex = 0; laserUpdateIndex < kMaxBoxes; laserUpdateIndex++) {
 
 			if (lasers[laserUpdateIndex].isShot) {
-
+			
 				if (lasers[laserUpdateIndex].length < lasers[laserUpdateIndex].maxLength) {
 
 					lasers[laserUpdateIndex].length += 60.0f;
@@ -2173,7 +2203,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		else {
 			Novice::ScreenPrintf(10, 70, "Attack : 2 - Laser");
 		}
-
+		Novice::ScreenPrintf(50, 90, "Current Frame : %d", currentFrame);
 		///
 		/// ↑描画処理ここまで
 		///
