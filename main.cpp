@@ -6,7 +6,7 @@
 #include <Xinput.h>
 #include "Controller.h"
 
-const char kWindowTitle[] = "TD1_2回目!!";
+const char kWindowTitle[] = "TD1_2回目!!!";
 
 // 砲台データ構造体
 struct BoxData
@@ -195,9 +195,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// キー入力結果を受け取る箱
 	char keys[256] = { 0 };
 	char preKeys[256] = { 0 };
-
+	
 	int bokasiTexture = Novice::LoadTexture("./Resources/bokasi.png");
-	int hosiTexture = Novice::LoadTexture("./Resources/hosi.png");
+	int hosiTexture = Novice::LoadTexture("./Resources/hikarin.png");
 
 	// ボスのデータ
 	float bossX = 960.0f;
@@ -206,6 +206,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	float bossSpeedX = 6.0f;
 	int bossTrailTimer = 0;
 
+	// boss
 	int bossState = 0;
 	int bossAttackTimer = 180;
 	float bossAuraRadius = 0.0f;
@@ -420,6 +421,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				bossAttackTimer = 45;
 			}
 		}
+		
 		else if (bossState == 1) {
 
 			bossAttackTimer--;
@@ -614,7 +616,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			if (currentFrame < 150)
 			{
 				currentFrame++;
-			} else
+			}
+			else
 			{
 				currentFrame = 150;
 				isCurrentFrameCount = 0;
@@ -700,7 +703,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			(keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
 			dashCount < kMaxDashes)
 		{
-	
+
 
 			//　ダッシュがクールダウン中ではない時かつ、攻撃中じゃないなら
 			if (dashCooldown <= 0 && !isAttacking)
@@ -728,7 +731,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				dashMoveTimer = kDashMoveFrames;
 				dashStunTimer = kDashStunMax;
 
-				if (currentFrame<=0)
+				if (currentFrame <= 0)
 				{
 					currentFrame++;
 				}
@@ -1167,7 +1170,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 							if (!sparks[sparkSpawnIndex].isExist) {
 
-							
+
 
 								sparks[sparkSpawnIndex].x = bossX;
 								sparks[sparkSpawnIndex].y = bossY;
@@ -1199,7 +1202,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		for (int laserUpdateIndex = 0; laserUpdateIndex < kMaxBoxes; laserUpdateIndex++) {
 
 			if (lasers[laserUpdateIndex].isShot) {
-			
+
 				if (lasers[laserUpdateIndex].length < lasers[laserUpdateIndex].maxLength) {
 
 					lasers[laserUpdateIndex].length += 60.0f;
