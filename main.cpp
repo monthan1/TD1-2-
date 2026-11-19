@@ -221,6 +221,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	char preKeys[256] = { 0 };
 
 	int bokasiTexture = Novice::LoadTexture("./Resources/bokasi.png");
+	int bokasi2Texture = Novice::LoadTexture("./Resources/bokasi2.png");
 	int hosiTexture = Novice::LoadTexture("./Resources/hikarin.png");
 	int bakuhatuTexture = Novice::LoadTexture("./Resources/bakuhatu.png");
 
@@ -414,7 +415,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const float kDoorHeight = 220.0f;
 
 	// 敵（野生＝赤、仲間＝青）の設定
-	const int kMaxStageEnemies = 200;
+	const int kMaxStageEnemies = 50;
 	const float kStageEnemyRadius = 12.0f;
 	StageEnemy stageEnemies[kMaxStageEnemies] = {};
 	int allyCount = 0;
@@ -480,6 +481,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		float centerX = playerPosX + behindDirX * (kFlockGap + maxRadius);
 		float centerY = playerPosY + behindDirY * (kFlockGap + maxRadius);
 
+		// 画面の中に収める範囲
+		float limitLeft = kStageEnemyRadius + 8.0f;
+		float limitRight = 1920.0f - limitLeft;
+		float limitTop = limitLeft;
+		float limitBottom = 1180.0f - limitLeft;
+
+		// 群れ全体が画面に収まるように、中心を内側へ寄せる
+		if (centerX < limitLeft + maxRadius) centerX = limitLeft + maxRadius;
+		if (centerX > limitRight - maxRadius) centerX = limitRight - maxRadius;
+		if (centerY < limitTop + maxRadius) centerY = limitTop + maxRadius;
+		if (centerY > limitBottom - maxRadius) centerY = limitBottom - maxRadius;
+
 		// ひまわり状に敷き詰める（人数が増えても密度が一定）
 		float angle = (float)index * 2.39996f;
 		float radius = kFlockSpacing * sqrtf((float)index + 0.5f);
@@ -490,6 +503,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		slotOutX = centerX + cosf(angle) * radius + wobbleX;
 		slotOutY = centerY + sinf(angle) * radius + wobbleY;
+
+		// 念のため、1体ずつも画面の中に収める
+		if (slotOutX < limitLeft) slotOutX = limitLeft;
+		if (slotOutX > limitRight) slotOutX = limitRight;
+		if (slotOutY < limitTop) slotOutY = limitTop;
+		if (slotOutY > limitBottom) slotOutY = limitBottom;
 		};
 
 	// 仲間ごとに追いかける速さを少しずつ変える（遅れてついてくる子がいる）
@@ -2126,6 +2145,25 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				float sideY = lasers[laserDrawIndex].velocityX;
 
 				float outerWidth = 14.0f;
+
+				// レーザーの光（ぼかし画像 2400x100 をレーザーの向きに合わせて伸ばして描く）
+				float laserGlowHalfWidth = 20.0f;   // 光の太さの半分
+				float laserGlowPad = 30.0f;         // レーザーの前後にはみ出す長さ
+
+				float glowStartX = lasers[laserDrawIndex].x - lasers[laserDrawIndex].velocityX * laserGlowPad;
+				float glowStartY = lasers[laserDrawIndex].y - lasers[laserDrawIndex].velocityY * laserGlowPad;
+				float glowEndX = endX + lasers[laserDrawIndex].velocityX * laserGlowPad;
+				float glowEndY = endY + lasers[laserDrawIndex].velocityY * laserGlowPad;
+
+				Novice::DrawQuad(
+					(int)(glowStartX - sideX * laserGlowHalfWidth), (int)(glowStartY - sideY * laserGlowHalfWidth),  // 左上
+					(int)(glowEndX - sideX * laserGlowHalfWidth), (int)(glowEndY - sideY * laserGlowHalfWidth),      // 右上
+					(int)(glowStartX + sideX * laserGlowHalfWidth), (int)(glowStartY + sideY * laserGlowHalfWidth),  // 左下
+					(int)(glowEndX + sideX * laserGlowHalfWidth), (int)(glowEndY + sideY * laserGlowHalfWidth),      // 右下
+					0, 0, 2400, 100,
+					bokasi2Texture,
+					0x33FFFFFF
+				);
 
 				int outerX1 = (int)(lasers[laserDrawIndex].x + sideX * outerWidth);
 				int outerY1 = (int)(lasers[laserDrawIndex].y + sideY * outerWidth);
