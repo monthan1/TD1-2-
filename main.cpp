@@ -224,6 +224,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int bokasi2Texture = Novice::LoadTexture("./Resources/bokasi2.png");
 	int hosiTexture = Novice::LoadTexture("./Resources/hikarin.png");
 	int bakuhatuTexture = Novice::LoadTexture("./Resources/bakuhatu.png");
+	int enTexture = Novice::LoadTexture("./Resources/en.png");
+	int namiTexture = Novice::LoadTexture("./Resources/nami.png");
+	/*int hikariTexture = Novice::LoadTexture("./Resources/hikari.png");
+	int flashTexture = Novice::LoadTexture("./Resources/flash.png");*/
 
 	// 爆発画像の拡大率
 	const float kExplosionScale = 2.5f;
@@ -235,6 +239,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	float bossRadius = 90.0f;
 	float bossSpeedX = 6.0f;
 	int bossTrailTimer = 0;
+
+	// ボスのシールド
+	const int kBossShieldMax = 100;
+	int bossShield = kBossShieldMax;
+
+	// シールドブレイク
+	int bossShieldBreakTimer = 0;
+	
+
+	// シールド破壊エフェクト
+	int shieldBreakEffectTimer = 0;
+	const int kShieldBreakEffectMax = 60;
+
+	// スローモーション演出
+	float gameSpeed = 1.0f;
+	int slowMotionTimer = 0;
+	const int kSlowMotionMax = 30;
 
 	// boss
 	int bossState = 0;
@@ -824,25 +845,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// 呼びかけの波
 			if (callTimer > 0) {
 
-				Novice::DrawEllipse(
-					(int)stagePlayerX,
-					(int)stagePlayerY,
-					(int)callRadius,
-					(int)callRadius,
+				float callScale = callRadius / 300.0f;
+
+				Novice::DrawSprite(
+					(int)(stagePlayerX - callRadius),
+					(int)(stagePlayerY - callRadius),
+					enTexture,
+					callScale,
+					callScale,
 					0.0f,
-					0x66AAFFFF,
-					kFillModeWireFrame
+					0xAADDFFFF
 				);
 
-				Novice::DrawEllipse(
-					(int)stagePlayerX,
-					(int)stagePlayerY,
-					(int)(callRadius * 0.9f),
-					(int)(callRadius * 0.9f),
-					0.0f,
-					0x3366FF88,
-					kFillModeWireFrame
-				);
+				
 			}
 
 			// 敵の描画（野生＝赤、仲間＝青）
@@ -939,6 +954,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 		/// ↓更新処理ここから
 		///
+
+		// シールドブレイク中のタイマー
+		if (bossShieldBreakTimer > 0) {
+			bossShieldBreakTimer--;
+		}
+
+		// シールド破壊エフェクトのタイマー
+		if (shieldBreakEffectTimer > 0) {
+			shieldBreakEffectTimer--;
+		}
 
 		// ボスの移動・突進処理 
 
@@ -1321,6 +1346,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			float hitDy = bossY - allyBullets[allyBulletUpdateIndex].y;
 
 			if (hitDx * hitDx + hitDy * hitDy < (bossRadius + 8.0f) * (bossRadius + 8.0f)) {
+
+				// ボスのシールドを減らす
+				if (bossShield > 0) {
+					bossShield -= 1;
+
+					if (bossShield <= 0) {
+						bossShield = 0;
+						bossShieldBreakTimer = 120;
+
+						// シールド破壊演出を開始
+						shieldBreakEffectTimer = kShieldBreakEffectMax;
+
+						// スローモーション開始
+						gameSpeed = 0.3f;
+						slowMotionTimer = kSlowMotionMax;
+					}
+				}
 
 				allyBullets[allyBulletUpdateIndex].isExist = 0;
 				screenShakeTimer = 2;
@@ -2462,6 +2504,73 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			kFillModeSolid
 		);
 
+		// スローモーションの更新
+		if (slowMotionTimer > 0) {
+			slowMotionTimer--;
+		} else {
+			gameSpeed = 1.0f;
+		}
+
+		// シールドブレイク演出
+		if (shieldBreakEffectTimer > 0) {
+
+
+			// 演出が始まってから何フレーム経過したか
+			int effectElapsed = kShieldBreakEffectMax - shieldBreakEffectTimer;
+
+			// フェード用の透明度
+			float effectAlpha = shieldBreakEffectTimer / 60.0f;
+
+			if (shieldBreakEffectTimer < 20) {
+				effectAlpha = shieldBreakEffectTimer / 20.0f;
+			}
+
+			//// 光専用の拡大率（徐々に広がる）
+			/*float hikariScale = 2.0f + effectElapsed * 0.04f;*/
+
+			// 波紋専用の拡大率
+			float waveScale = 0.5f + effectElapsed * 0.04f;
+
+			// フラッシュ専用の拡大率
+			float flashScale = 2.0f - effectElapsed * 0.15f;
+
+			if (flashScale < 0.0f) {
+				flashScale = 0.0f;
+			}
+
+			// ボスの中心から広がる波
+			Novice::DrawSprite(
+				(int)(bossX - 256.0f * waveScale) + screenShakeX,
+				(int)(bossY - 256.0f * waveScale) + screenShakeY,
+				namiTexture,
+				waveScale, waveScale,
+				0.0f,
+				0xFFFFFF00 | (unsigned int)(effectAlpha * 255.0f)
+			);
+
+			//// ボスの中心に光を表示
+			//Novice::DrawSprite(
+			//	(int)(bossX - 256.0f * hikariScale) + screenShakeX,
+			//	(int)(bossY - 256.0f * hikariScale) + screenShakeY,
+			//	hikariTexture,
+			//	hikariScale, hikariScale,
+			//	0.0f,
+			//	0xFFFFFF00 | (unsigned int)(effectAlpha * 255.0f)
+			//);
+			//// フラッシュは最初の12フレームだけ表示
+			//if (effectElapsed < 3) {
+
+			//	Novice::DrawSprite(
+			//		(int)(bossX - 256.0f * flashScale) + screenShakeX,
+			//		(int)(bossY - 256.0f * flashScale) + screenShakeY,
+			//		flashTexture,
+			//		flashScale, flashScale,
+			//		0.0f,
+			//		0xFFFFFF00 | (unsigned int)(effectAlpha * 255.0f)
+			//	);
+			//}
+		}
+
 		// ダッシュ爆弾の爆発画像を描画
 		for (int dashBombExplosionDrawIndex = 0;
 			dashBombExplosionDrawIndex < kMaxBombs;
@@ -2768,6 +2877,64 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			(int)lookX,
 			(int)lookY,
 			WHITE
+		);
+
+		// ==============================
+// ボスのシールドゲージ
+// ==============================
+
+		int shieldBarX = 660;
+		int shieldBarY = 60;
+		int shieldBarWidth = 600;
+		int shieldBarHeight = 24;
+
+		// 背景
+		Novice::DrawBox(
+			shieldBarX,
+			shieldBarY,
+			shieldBarWidth,
+			shieldBarHeight,
+			0.0f,
+			0x222222FF,
+			kFillModeSolid
+		);
+
+		// シールドの残量
+		float shieldRatio = (float)bossShield / (float)kBossShieldMax;
+
+		int currentShieldWidth = (int)(shieldBarWidth * shieldRatio);
+
+		// 残量ゲージ
+		if (bossShield > 0) {
+			Novice::DrawBox(
+				shieldBarX,
+				shieldBarY,
+				currentShieldWidth,
+				shieldBarHeight,
+				0.0f,
+				0x00CCFFFF,
+				kFillModeSolid
+			);
+		}
+
+		// 外枠
+		Novice::DrawBox(
+			shieldBarX,
+			shieldBarY,
+			shieldBarWidth,
+			shieldBarHeight,
+			0.0f,
+			WHITE,
+			kFillModeWireFrame
+		);
+
+		// 数値表示
+		Novice::ScreenPrintf(
+			shieldBarX,
+			shieldBarY - 25,
+			"BOSS ARMOR : %d / %d",
+			bossShield,
+			kBossShieldMax
 		);
 
 		// UI表示
