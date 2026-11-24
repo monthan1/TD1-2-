@@ -177,6 +177,29 @@ struct StageEnemy
 	int isExist;
 };
 
+// 集めちゃダメな敵の構造体（呼びかけに触れると爆発する）
+struct BadEnemy
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int wanderTimer;
+	int isCollected;   // 1 = 呼びかけで集めてしまった（群れについてくる）
+	int bombTimer;     // 集めてから爆発するまでのフレーム数
+	int isExist;
+};
+
+// 小さな爆発エフェクトの構造体
+struct SmallExplosion
+{
+	float x;
+	float y;
+	float scale;
+	int life;
+	int isExist;
+};
+
 // 仲間の弾構造体
 struct AllyBullet
 {
@@ -184,6 +207,27 @@ struct AllyBullet
 	float y;
 	float velocityX;
 	float velocityY;
+	int isExist;
+};
+
+// ボスの分身
+struct BossClone
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int isExist;
+};
+
+// ボスが召喚する敵（赤）
+struct SummonEnemy
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	int life;
 	int isExist;
 };
 
@@ -249,9 +293,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const int kBossShieldMax = 100;
 	int bossShield = kBossShieldMax;
 
+	// ボスの形態（1:第1形態 2:第2形態）
+	int bossPhase = 1;
+
 	// シールドブレイク
 	int bossShieldBreakTimer = 0;
-	
+
 
 	// シールド破壊エフェクト
 	int shieldBreakEffectTimer = 0;
@@ -263,6 +310,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	const int kSlowMotionMax = 30;
 
+	// ボスのシールドを減らす（弾・レーザーが当たったときに使う）
+	const int kBeamDamage = 5;     // 弾(ブラスターの弾)が当たったときのダメージ
+	const int kLaserDamage = 10;   // レーザーが当たったときのダメージ
+	auto damageBossShield = [&](int damage) {
+
+		if (bossShield > 0) {
+			bossShield -= damage;
+
+			if (bossShield <= 0) {
+				bossShield = 0;
+				bossShieldBreakTimer = 120;
+
+				// シールド破壊演出を開始
+				shieldBreakEffectTimer = kShieldBreakEffectMax;
+
+				// スローモーション開始
+				gameSpeed = 0.3f;
+				slowMotionTimer = kSlowMotionMax;
+			}
+		}
+		};
+
 	// boss
 	int bossState = 0;
 	int bossAttackTimer = 180;
@@ -272,6 +341,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	float bossChargeVelocityY = 0.0f;
 	float bossRotationAngle = 0.0f;
 	int bossSpinTimer = 0;
+	int ufoMoveTimer = 0;               // UFOのふわふわ用
+	float bossSweepDirection = 1.0f;    // 爆撃で進む向き（1:右へ、-1:左へ）
+
+	int bossPatternIndex = 0;      // 次の攻撃（0:通常突進 1:分身突進 2:召喚）
+	int bossIsCloneCharge = 0;     // 1 = 今の突進は分身つき
+	int bossCloneBombCount = 0;    // 分身の爆弾を間引く用
+	int bossSummonTimer = 0;       // 召喚の間隔用
+	int bossSummonCount = 0;       // 今回の召喚で出した数
 
 	// プレイヤーのデータ
 	float playerX = 960.0f;
@@ -325,6 +402,38 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const int kMaxBombs = 30;
 	Bomb bombs[kMaxBombs] = {};
 	int bombDropTimer = 0;
+
+	// 分身の設定
+	const int kMaxBossClones = 2;
+	BossClone bossClones[kMaxBossClones] = {};
+
+	// 召喚された敵（赤）の設定
+	const int kMaxSummons = 8;
+	SummonEnemy summons[kMaxSummons] = {};
+
+	// 落ちない爆弾を置く（分身の爆弾・召喚した敵の自爆で使う）
+	auto placeMineBomb = [&](float mineX, float mineY, int mineTimer) {
+
+		for (int mineIndex = 0; mineIndex < kMaxBombs; mineIndex++) {
+
+			if (!bombs[mineIndex].isExist) {
+
+				bombs[mineIndex].x = mineX;
+				bombs[mineIndex].y = mineY;
+				bombs[mineIndex].velocityX = 0.0f;
+				bombs[mineIndex].velocityY = 0.0f;
+				bombs[mineIndex].isFalling = 0;
+				bombs[mineIndex].isGlitch = 0;
+
+				bombs[mineIndex].timer = mineTimer;
+				bombs[mineIndex].life = 0;
+				bombs[mineIndex].exploded = 0;
+				bombs[mineIndex].isExist = 1;
+
+				break;
+			}
+		}
+		};
 
 	// グリッチエフェクトの設定
 	const int kMaxGlitchParticles = 200;
@@ -456,6 +565,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int callCooldown = 0;
 	float callRadius = 0.0f;
 
+	// エイム線の設定（SPACE長押しで表示、離したら呼びかけ）
+	// const float kAimLength = kCallStartRadius + kCallSpeed * kCallFrames;
+	const float kAimLength = kCallStartRadius + kCallSpeed * (kCallFrames - 1);   // エイム線の長さ（呼びかけの円の端まで）
+	float aimDirX = 0.0f;              // エイムの向き（最後に動いた向き。最初は上＝扉の方向）
+	float aimDirY = -1.0f;
+	float aimEndX = 0.0f;              // エイム線の先端
+	float aimEndY = 0.0f;
+	float callCenterX = 0.0f;          // 呼びかけの波の中心
+	float callCenterY = 0.0f;
+	int isAiming = 0;                  // 1 = SPACE長押し中
+	int preAiming = 0;
+
 	// 仲間がプレイヤーの後ろに群れでついてくる設定（ピクミン風）
 	const float kFlockSpacing = 18.0f;      // 群れの密度（小さいほどぎゅっと集まる）
 	const float kFlockGap = 45.0f;          // プレイヤーと群れの間の距離
@@ -552,6 +673,49 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		allyBullets[allyBulletInitIndex].isExist = 0;
 	}
 
+	// 集めちゃダメな敵（紫）の設定
+	const int kMaxBadEnemies = 8;
+	const int kBadBombFrames = 120;             // 集めてから爆発するまで（2秒）
+	const float kBadBlastRadius = 90.0f;        // 巻き込む範囲
+	const float kBadBlastScale = 1.3f;          // 爆発画像の大きさ（本体）
+	const float kBadVictimScale = 0.6f;         // 爆発画像の大きさ（巻き込まれた仲間）
+	const int kMaxSmallExplosions = 64;
+	const int kSmallExplosionFrames = 25;       // 爆発アニメの長さ（フレーム）
+	BadEnemy badEnemies[kMaxBadEnemies] = {};
+	SmallExplosion smallExplosions[kMaxSmallExplosions] = {};
+
+	// 爆発エフェクトを1つ出す
+	auto spawnSmallExplosion = [&](float x, float y, float scale) {
+
+		for (int spawnIndex = 0; spawnIndex < kMaxSmallExplosions; spawnIndex++) {
+
+			if (!smallExplosions[spawnIndex].isExist) {
+				smallExplosions[spawnIndex].x = x;
+				smallExplosions[spawnIndex].y = y;
+				smallExplosions[spawnIndex].scale = scale;
+				smallExplosions[spawnIndex].life = kSmallExplosionFrames;
+				smallExplosions[spawnIndex].isExist = 1;
+				return;
+			}
+		}
+		};
+
+	for (int badEnemyInitIndex = 0; badEnemyInitIndex < kMaxBadEnemies; badEnemyInitIndex++) {
+
+		badEnemies[badEnemyInitIndex].x = 100.0f + (float)(rand() % 1720);
+		badEnemies[badEnemyInitIndex].y = 400.0f + (float)(rand() % 500);
+		badEnemies[badEnemyInitIndex].velocityX = 0.0f;
+		badEnemies[badEnemyInitIndex].velocityY = 0.0f;
+		badEnemies[badEnemyInitIndex].wanderTimer = rand() % 60;
+		badEnemies[badEnemyInitIndex].isCollected = 0;
+		badEnemies[badEnemyInitIndex].bombTimer = 0;
+		badEnemies[badEnemyInitIndex].isExist = 1;
+	}
+
+	for (int smallExplosionInitIndex = 0; smallExplosionInitIndex < kMaxSmallExplosions; smallExplosionInitIndex++) {
+		smallExplosions[smallExplosionInitIndex].isExist = 0;
+	}
+
 	// ステージの敵の初期化
 	for (int stageEnemyInitIndex = 0; stageEnemyInitIndex < kMaxStageEnemies; stageEnemyInitIndex++) {
 
@@ -643,20 +807,48 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				callCooldown--;
 			}
 
-			// 呼びかけ（SPACEキー）
-			if ((Controller::IsPressed(kPadButton10) ||
-				(keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
+			// エイムの向きを更新（動いている間は進行方向を向く）
+			if (stageMoveLength > 0.0f) {
+				aimDirX = stageMoveX / stageMoveLength;
+				aimDirY = stageMoveY / stageMoveLength;
+			}
+
+			// 仲間（紫の爆弾も含む）は必ずプレイヤーが向いている方向の逆（後ろ）に行く
+			behindDirX = -aimDirX;
+			behindDirY = -aimDirY;
+
+			// エイム線の先端（画面の中に収める）
+			aimEndX = stagePlayerX + aimDirX * kAimLength;
+			aimEndY = stagePlayerY + aimDirY * kAimLength;
+
+			if (aimEndX < 0.0f) aimEndX = 0.0f;
+			if (aimEndX > 1920.0f) aimEndX = 1920.0f;
+			if (aimEndY < 0.0f) aimEndY = 0.0f;
+			if (aimEndY > 1180.0f) aimEndY = 1180.0f;
+
+			// 呼びかけ（SPACEキーを長押しでエイム、離したら呼びかけ）
+			// 1フレーム前の状態を覚えておく
+			preAiming = isAiming;
+			// SPACEかボタンを押してる間はエイム中
+			isAiming = (keys[DIK_SPACE] || Controller::IsDown(kPadButton10)) ? 1 : 0;
+
+			// 離した瞬間にプレイヤーを中心に呼びかけ
+			if (preAiming && !isAiming &&
 				callTimer == 0 && callCooldown == 0) {
 
 				callTimer = kCallFrames;
 				callRadius = kCallStartRadius;
 				callCooldown = kCallCooldownMax;
+				callCenterX = stagePlayerX;
+				callCenterY = stagePlayerY;
 			}
 
 			// 呼びかけの波を広げる
 			if (callTimer > 0) {
 				callTimer--;
 				callRadius += kCallSpeed;
+				callCenterX = stagePlayerX;   // 波はプレイヤーについてくる
+				callCenterY = stagePlayerY;
 			}
 
 			// 敵の更新
@@ -689,8 +881,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					// 呼びかけの波に触れたら仲間（青）になる
 					if (callTimer > 0) {
 
-						float callDx = stageEnemies[stageEnemyUpdateIndex].x - stagePlayerX;
-						float callDy = stageEnemies[stageEnemyUpdateIndex].y - stagePlayerY;
+						float callDx = stageEnemies[stageEnemyUpdateIndex].x - callCenterX;
+						float callDy = stageEnemies[stageEnemyUpdateIndex].y - callCenterY;
 
 						if (callDx * callDx + callDy * callDy <= callRadius * callRadius) {
 							stageEnemies[stageEnemyUpdateIndex].isAlly = 1;
@@ -762,6 +954,167 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 					allyIndex++;
 					allyCount++;
+				}
+			}
+
+			// 集めちゃダメな敵（紫）の更新
+			// 集めちゃった紫の数
+			int badCollectedTotal = 0;
+
+			for (int badCountIndex = 0; badCountIndex < kMaxBadEnemies; badCountIndex++) {
+				if (badEnemies[badCountIndex].isExist && badEnemies[badCountIndex].isCollected) {
+					badCollectedTotal++;
+				}
+			}
+
+			int badCollectedIndex = 0;
+
+			// 紫の敵を1体ずつ更新
+			for (int badUpdateIndex = 0; badUpdateIndex < kMaxBadEnemies; badUpdateIndex++) {
+
+				if (!badEnemies[badUpdateIndex].isExist) {
+					continue;
+				}
+
+				// 集めてしまった紫の敵：群れについていき、2秒後に爆発する
+				if (badEnemies[badUpdateIndex].isCollected) {
+
+					// 群れの外側の定位置についていく
+					float badSlotX = 0.0f;
+					float badSlotY = 0.0f;
+					getAllySlot(stageAllyTotal + badCollectedIndex, stageAllyTotal + badCollectedTotal, stagePlayerX, stagePlayerY, badSlotX, badSlotY);
+
+					// 紫は少し速めに追いかける
+					float badFollowX = (badSlotX - badEnemies[badUpdateIndex].x) * 0.12f;
+					float badFollowY = (badSlotY - badEnemies[badUpdateIndex].y) * 0.12f;
+					float badFollowLength = sqrtf(badFollowX * badFollowX + badFollowY * badFollowY);
+
+					// 速さに上限をつける
+					if (badFollowLength > 16.0f) {
+						badFollowX = badFollowX / badFollowLength * 16.0f;
+						badFollowY = badFollowY / badFollowLength * 16.0f;
+					}
+
+					// 動かす
+					badEnemies[badUpdateIndex].x += badFollowX;
+					badEnemies[badUpdateIndex].y += badFollowY;
+
+					badCollectedIndex++;
+
+					// 爆発までのカウントダウン
+					badEnemies[badUpdateIndex].bombTimer--;
+
+					// 時間になったら爆発して、周りの仲間を巻き込む
+					if (badEnemies[badUpdateIndex].bombTimer <= 0) {
+
+						float blastX = badEnemies[badUpdateIndex].x;
+						float blastY = badEnemies[badUpdateIndex].y;
+
+						badEnemies[badUpdateIndex].isExist = 0;
+						spawnSmallExplosion(blastX, blastY, kBadBlastScale);
+
+						// 範囲内の仲間を消す
+						for (int victimIndex = 0; victimIndex < kMaxStageEnemies; victimIndex++) {
+
+							if (!stageEnemies[victimIndex].isExist || !stageEnemies[victimIndex].isAlly) {
+								continue;
+							}
+
+							float victimDx = stageEnemies[victimIndex].x - blastX;
+							float victimDy = stageEnemies[victimIndex].y - blastY;
+
+							if (victimDx * victimDx + victimDy * victimDy <= kBadBlastRadius * kBadBlastRadius) {
+								stageEnemies[victimIndex].isExist = 0;
+								// 爆発の絵は本体の1個だけにするため、巻き込まれた仲間の爆発エフェクトは出さない
+								// spawnSmallExplosion(stageEnemies[victimIndex].x, stageEnemies[victimIndex].y, kBadVictimScale);
+								(void)kBadVictimScale; // 未使用警告を避けるため（巻き込まれた仲間の爆発を出さなくなったので）
+							}
+						}
+
+						// 範囲内にいる他の紫の敵も誘爆させる
+						for (int chainIndex = 0; chainIndex < kMaxBadEnemies; chainIndex++) {
+
+							if (!badEnemies[chainIndex].isExist || !badEnemies[chainIndex].isCollected) {
+								continue;
+							}
+
+							float chainDx = badEnemies[chainIndex].x - blastX;
+							float chainDy = badEnemies[chainIndex].y - blastY;
+
+							if (chainDx * chainDx + chainDy * chainDy <= kBadBlastRadius * kBadBlastRadius &&
+								badEnemies[chainIndex].bombTimer > 6) {
+								badEnemies[chainIndex].bombTimer = 6;
+							}
+						}
+					}
+
+					continue;
+				}
+
+				// 呼びかけの波に触れたら集めてしまう（2秒後に爆発）
+				if (callTimer > 0) {
+
+					float badCallDx = badEnemies[badUpdateIndex].x - callCenterX;
+					float badCallDy = badEnemies[badUpdateIndex].y - callCenterY;
+
+					if (badCallDx * badCallDx + badCallDy * badCallDy <= callRadius * callRadius) {
+
+						badEnemies[badUpdateIndex].isCollected = 1;
+						badEnemies[badUpdateIndex].bombTimer = kBadBombFrames;
+						continue;
+					}
+				}
+
+				// ふらふら歩き回る
+				badEnemies[badUpdateIndex].wanderTimer--;
+
+				if (badEnemies[badUpdateIndex].wanderTimer <= 0) {
+
+					badEnemies[badUpdateIndex].wanderTimer = 60 + rand() % 90;
+
+					if (rand() % 3 == 0) {
+						badEnemies[badUpdateIndex].velocityX = 0.0f;
+						badEnemies[badUpdateIndex].velocityY = 0.0f;
+					}
+					else {
+						float badWanderAngle = (float)(rand() % 628) / 100.0f;
+						float badWanderSpeed = 0.8f + (float)(rand() % 15) / 10.0f;
+
+						badEnemies[badUpdateIndex].velocityX = cosf(badWanderAngle) * badWanderSpeed;
+						badEnemies[badUpdateIndex].velocityY = sinf(badWanderAngle) * badWanderSpeed;
+					}
+				}
+
+				// 動かす
+				badEnemies[badUpdateIndex].x += badEnemies[badUpdateIndex].velocityX;
+				badEnemies[badUpdateIndex].y += badEnemies[badUpdateIndex].velocityY;
+
+				// 歩ける範囲から出たら跳ね返る
+				if (badEnemies[badUpdateIndex].x < 30.0f || badEnemies[badUpdateIndex].x > 1890.0f) {
+					badEnemies[badUpdateIndex].velocityX *= -1.0f;
+				}
+
+				if (badEnemies[badUpdateIndex].y < 330.0f || badEnemies[badUpdateIndex].y > 1150.0f) {
+					badEnemies[badUpdateIndex].velocityY *= -1.0f;
+				}
+
+				// 念のため範囲内に戻す
+				if (badEnemies[badUpdateIndex].x < 30.0f) badEnemies[badUpdateIndex].x = 30.0f;
+				if (badEnemies[badUpdateIndex].x > 1890.0f) badEnemies[badUpdateIndex].x = 1890.0f;
+				if (badEnemies[badUpdateIndex].y < 330.0f) badEnemies[badUpdateIndex].y = 330.0f;
+				if (badEnemies[badUpdateIndex].y > 1150.0f) badEnemies[badUpdateIndex].y = 1150.0f;
+			}
+
+			// 小さな爆発エフェクトの更新
+			for (int smallExplosionUpdateIndex = 0; smallExplosionUpdateIndex < kMaxSmallExplosions; smallExplosionUpdateIndex++) {
+
+				if (smallExplosions[smallExplosionUpdateIndex].isExist) {
+
+					smallExplosions[smallExplosionUpdateIndex].life--;
+
+					if (smallExplosions[smallExplosionUpdateIndex].life <= 0) {
+						smallExplosions[smallExplosionUpdateIndex].isExist = 0;
+					}
 				}
 			}
 
@@ -848,14 +1201,58 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				kFillModeSolid
 			);
 
+			// エイム線（SPACE長押し中）
+			if (isAiming) {
+
+				// プレイヤーから先端までの線
+				Novice::DrawLine(
+					(int)stagePlayerX,
+					(int)stagePlayerY,
+					(int)aimEndX,
+					(int)aimEndY,
+					0x66AAFFFF
+				);
+
+				// 呼びかけが届く範囲（プレイヤーを中心にした円）
+				Novice::DrawEllipse(
+					(int)stagePlayerX,
+					(int)stagePlayerY,
+					// (int)(kCallStartRadius + kCallSpeed * kCallFrames),
+					// (int)(kCallStartRadius + kCallSpeed * kCallFrames),
+					(int)(kCallStartRadius + kCallSpeed * (kCallFrames - 1)),
+					(int)(kCallStartRadius + kCallSpeed * (kCallFrames - 1)),
+					0.0f,
+					0x88CCFFFF,
+					kFillModeWireFrame
+				);
+
+				// 先端の印
+				Novice::DrawEllipse(
+					(int)aimEndX,
+					(int)aimEndY,
+					8,
+					8,
+					0.0f,
+					0x66AAFFFF,
+					kFillModeSolid
+				);
+			}
+
 			// 呼びかけの波
 			if (callTimer > 0) {
 
-				float callScale = callRadius / 300.0f;
+				// float callScale = callRadius / 300.0f;
+				// en.pngは600x600だが、輪の部分は直径約385px、輪の中心は(301, 297)
+				const float kEnCircleSize = 385.0f;
+				const float kEnCenterX = 301.0f;
+				const float kEnCenterY = 297.0f;
+				float callScale = (callRadius * 2.0f) / kEnCircleSize;
 
 				Novice::DrawSprite(
-					(int)(stagePlayerX - callRadius),
-					(int)(stagePlayerY - callRadius),
+					// (int)(stagePlayerX - callRadius),
+					// (int)(stagePlayerY - callRadius),
+					(int)(stagePlayerX - kEnCenterX * callScale),
+					(int)(stagePlayerY - kEnCenterY * callScale),
 					enTexture,
 					callScale,
 					callScale,
@@ -863,7 +1260,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					0xAADDFFFF
 				);
 
-				
+
 			}
 
 			// 敵の描画（野生＝赤、仲間＝青）
@@ -919,6 +1316,93 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				}
 			}
 
+			// 集めちゃダメな敵（紫）の描画
+			for (int badDrawIndex = 0; badDrawIndex < kMaxBadEnemies; badDrawIndex++) {
+
+				if (!badEnemies[badDrawIndex].isExist) {
+					continue;
+				}
+
+				unsigned int badColor = 0xAA33FFFF;
+				unsigned int badRimColor = 0x550099FF;
+
+				// 集めてしまった敵は、爆発が近づくほど速く点滅する
+				if (badEnemies[badDrawIndex].isCollected) {
+
+					int blinkInterval = 12;
+					if (badEnemies[badDrawIndex].bombTimer <= 60) blinkInterval = 6;
+					if (badEnemies[badDrawIndex].bombTimer <= 30) blinkInterval = 3;
+
+					if ((badEnemies[badDrawIndex].bombTimer / blinkInterval) % 2 == 0) {
+						badColor = WHITE;
+					}
+
+					// 巻き込まれる範囲
+					Novice::DrawEllipse(
+						(int)badEnemies[badDrawIndex].x,
+						(int)badEnemies[badDrawIndex].y,
+						(int)kBadBlastRadius,
+						(int)kBadBlastRadius,
+						0.0f,
+						0xAA33FF88,
+						kFillModeWireFrame
+					);
+				}
+
+				// 縁
+				Novice::DrawEllipse(
+					(int)badEnemies[badDrawIndex].x,
+					(int)badEnemies[badDrawIndex].y,
+					(int)kStageEnemyRadius + 3,
+					(int)kStageEnemyRadius + 3,
+					0.0f,
+					badRimColor,
+					kFillModeSolid
+				);
+
+				// 本体
+				Novice::DrawEllipse(
+					(int)badEnemies[badDrawIndex].x,
+					(int)badEnemies[badDrawIndex].y,
+					(int)kStageEnemyRadius,
+					(int)kStageEnemyRadius,
+					0.0f,
+					badColor,
+					kFillModeSolid
+				);
+			}
+
+			// 小さな爆発エフェクトの描画（bakuhatu.png）
+			for (int smallExplosionDrawIndex = 0; smallExplosionDrawIndex < kMaxSmallExplosions; smallExplosionDrawIndex++) {
+
+				if (!smallExplosions[smallExplosionDrawIndex].isExist) {
+					continue;
+				}
+
+				// 爆発のアニメーションフレームを計算（9コマ）
+				int smallFrame = (kSmallExplosionFrames - smallExplosions[smallExplosionDrawIndex].life) * 9 / kSmallExplosionFrames;
+				if (smallFrame < 0) smallFrame = 0;
+				if (smallFrame > 8) smallFrame = 8;
+
+				float smallScale = smallExplosions[smallExplosionDrawIndex].scale;
+				int smallHalfSize = (int)(62.0f * smallScale);
+
+				// 画像の一部だけ切り出して描く
+				Novice::DrawSpriteRect(
+					(int)smallExplosions[smallExplosionDrawIndex].x - smallHalfSize,
+					(int)smallExplosions[smallExplosionDrawIndex].y - smallHalfSize,
+					smallFrame * 124,
+					0,
+					124,
+					124,
+					bakuhatuTexture,
+					(124.0f / 1116.0f) * smallScale,
+					smallScale,
+					0.0f,
+					WHITE
+				);
+			}
+
 			// プレイヤーの描画
 			Novice::DrawSprite(
 				(int)(stagePlayerX - 52),
@@ -942,7 +1426,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			// UI表示
 			Novice::ScreenPrintf(10, 10, "Move : WASD");
-			Novice::ScreenPrintf(10, 30, "Call : SPACE (red -> blue)");
+			// Novice::ScreenPrintf(10, 30, "Call : SPACE (red -> blue)");
+			Novice::ScreenPrintf(10, 30, "Call : hold SPACE to aim, release to call (red -> blue)");
 			Novice::ScreenPrintf(10, 50, "Allies : %d / %d", allyCount, kMaxStageEnemies);
 			Novice::ScreenPrintf(10, 70, "Enter the door to fight the boss");
 
@@ -969,24 +1454,100 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// シールド破壊エフェクトのタイマー
 		if (shieldBreakEffectTimer > 0) {
 			shieldBreakEffectTimer--;
+
+			// 第1形態が倒されて破壊演出が終わったら、第2形態になる
+			if (shieldBreakEffectTimer == 0 && bossPhase == 1 && bossShield <= 0) {
+
+				bossPhase = 2;
+				bossShield = kBossShieldMax;   // シールドを満タンに戻す
+				bossShieldBreakTimer = 0;
+
+				// 攻撃を最初からやり直す
+				bossState = 0;
+				bossAttackTimer = 60;
+				bossIsCloneCharge = 0;
+
+				// 第2形態は横の動きが速い（向きはそのまま）
+				if (bossSpeedX > 0.0f) {
+					bossSpeedX = 9.0f;
+				}
+				else {
+					bossSpeedX = -9.0f;
+				}
+
+				// 残っている分身は消す
+				for (int phaseCloneIndex = 0; phaseCloneIndex < kMaxBossClones; phaseCloneIndex++) {
+					bossClones[phaseCloneIndex].isExist = 0;
+				}
+
+				// 登場の合図に画面を揺らす
+				screenShakeTimer = 30;
+			}
 		}
 
 		// ボスの移動・突進処理 
 
 		if (bossState == 0) {
 
-			bossX += bossSpeedX;
+			// ふわふわ動くためのカウント
+			ufoMoveTimer++;
 
-			if (bossX - bossRadius <= 0.0f ||
-				bossX + bossRadius >= 1920.0f) {
-				bossSpeedX *= -1.0f;
+			// 横に滑る（速さが少しずつ変わる）
+			// 速さを揺らしながら横に動く
+			bossX += bossSpeedX * (1.0f + sinf(ufoMoveTimer * 0.06f) * 0.5f);
+
+			// 上下にふわふわ揺れる
+			float hoverY = 295.0f + sinf(ufoMoveTimer * 0.07f) * 35.0f;
+			bossY += (hoverY - bossY) * 0.08f;
+
+			// 画面の端で向きを変える
+			if (bossX - bossRadius <= 0.0f) {
+				// bossSpeedX = 6.0f;
+				bossSpeedX = (bossPhase == 2) ? 9.0f : 6.0f;
 			}
 
+			if (bossX + bossRadius >= 1920.0f) {
+				// bossSpeedX = -6.0f;
+				bossSpeedX = (bossPhase == 2) ? -9.0f : -6.0f;
+			}
+
+			// 攻撃までのカウントダウン
 			bossAttackTimer--;
 
 			if (bossAttackTimer <= 0) {
 				bossState = 1;
 				bossAttackTimer = 45;
+
+				// 近いほうの画面の端から爆撃を始める
+				if (bossX < 960.0f) {
+					bossSweepDirection = 1.0f;
+				}
+				else {
+					bossSweepDirection = -1.0f;
+				}
+
+				// 今回の攻撃を決める（0:通常突進 1:分身突進 2:召喚）
+				bossIsCloneCharge = 0;
+
+				if (bossPatternIndex == 1) {
+					bossIsCloneCharge = 1;
+				}
+				else if (bossPatternIndex == 2) {
+					// 召喚（突進ではなく状態5へ）
+					bossState = 5;
+					bossAttackTimer = 100;
+					bossSummonTimer = 0;
+					bossSummonCount = 0;
+				}
+
+				// 次の攻撃はランダム（同じ攻撃が2回続かないようにする）
+				int nextPattern = rand() % 3;
+
+				if (nextPattern == bossPatternIndex) {
+					nextPattern = (nextPattern + 1 + rand() % 2) % 3;
+				}
+
+				bossPatternIndex = nextPattern;
 			}
 		}
 
@@ -996,24 +1557,106 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			if (bossAttackTimer <= 0) {
 
-				float dx = playerX - bossX;
-				float dy = playerY - bossY;
+				// 今のプレイヤーの方向に向かって突進する
+				// プレイヤーの方向を求める
+				float chargeDx = playerX - bossX;
+				float chargeDy = playerY - bossY;
+				float chargeLength = sqrtf(chargeDx * chargeDx + chargeDy * chargeDy);
 
-				float length = sqrtf(dx * dx + dy * dy);
-
-				if (length > 0.0f) {
-					bossChargeVelocityX = dx / length * 22.0f;
-					bossChargeVelocityY = dy / length * 22.0f;
+				if (chargeLength > 0.0f) {
+					// 方向×速さで突進の速度にする
+					bossChargeVelocityX = chargeDx / chargeLength * 22.0f;
+					bossChargeVelocityY = chargeDy / chargeLength * 22.0f;
+				}
+				else {
+					bossChargeVelocityX = 0.0f;
+					bossChargeVelocityY = 22.0f;
 				}
 
 				bossState = 2;
 				bossTrailTimer = 0;
 				bossAttackTimer = 30;
 
+				// 通常突進はプレイヤーの手前ギリギリで止まる（分身つきは今まで通り）
+				if (!bossIsCloneCharge) {
+					// 止まる距離＝プレイヤーまでの距離 − (ボスの半径＋プレイヤーの半径＋すき間20)
+					float stopLength = chargeLength - (bossRadius + playerRadius + 20.0f);
+					bossAttackTimer = (int)(stopLength / 22.0f);
+
+					// プレイヤーが近すぎたときも最低1フレームは動く
+					if (bossAttackTimer < 1) {
+						bossAttackTimer = 1;
+					}
+				}
+				else {
+					// プレイヤーの近くまで届く長さにする（近すぎ・遠すぎは調整）
+					bossAttackTimer = (int)(chargeLength / 22.0f);
+
+					if (bossAttackTimer < 10) {
+						bossAttackTimer = 10;
+					}
+				}
+
+				if (bossAttackTimer > 100) {
+					bossAttackTimer = 100;
+				}
+
 				// 爆弾を落とすタイマーをリセット
 				bombDropTimer = 0;
 
 				screenShakeTimer = 10;
+
+				// 分身突進のときは、分身を2体出して、3体を左・真ん中・右に分けて突進させる
+				// 本体がどの位置になるかはランダム（右から出たり、左から出たりする）
+				if (bossIsCloneCharge) {
+
+					// 突進の向きをずらす角度（3体分）
+					float cloneAngleOffset[3] = { 0.0f, 0.0f, 0.0f };
+
+					// 左右にずらす角度は毎回ランダム（0.3〜0.79ラジアン）
+					cloneAngleOffset[0] = 0.3f + (float)(rand() % 50) / 100.0f;
+					cloneAngleOffset[2] = -(0.3f + (float)(rand() % 50) / 100.0f);
+
+					// 本体がどの位置に入るか（0〜2）
+					int bossSlotIndex = rand() % 3;
+
+					// プレイヤーに向かう元の向き
+					float baseVelocityX = bossChargeVelocityX;
+					float baseVelocityY = bossChargeVelocityY;
+
+					int cloneSpawnIndex = 0;
+
+					// 3体分の向きを作る
+					for (int slotIndex = 0; slotIndex < 3; slotIndex++) {
+
+						float slotCos = cosf(cloneAngleOffset[slotIndex]);
+						float slotSin = sinf(cloneAngleOffset[slotIndex]);
+
+						// 突進の向きを回転させる
+						float slotVelocityX = baseVelocityX * slotCos - baseVelocityY * slotSin;
+						float slotVelocityY = baseVelocityX * slotSin + baseVelocityY * slotCos;
+
+						if (slotIndex == bossSlotIndex) {
+
+							// 本体
+							bossChargeVelocityX = slotVelocityX;
+							bossChargeVelocityY = slotVelocityY;
+						}
+						else {
+
+							// 分身
+							bossClones[cloneSpawnIndex].x = bossX;
+							bossClones[cloneSpawnIndex].y = bossY;
+							bossClones[cloneSpawnIndex].velocityX = slotVelocityX;
+							bossClones[cloneSpawnIndex].velocityY = slotVelocityY;
+							bossClones[cloneSpawnIndex].isExist = 1;
+
+							cloneSpawnIndex++;
+						}
+					}
+
+					bossCloneBombCount = 0;
+				}
 
 			}
 		}
@@ -1082,6 +1725,44 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				}
 			}
 
+			// 分身の移動
+			for (int cloneUpdateIndex = 0; cloneUpdateIndex < kMaxBossClones; cloneUpdateIndex++) {
+
+				if (!bossClones[cloneUpdateIndex].isExist) {
+					continue;
+				}
+
+				bossClones[cloneUpdateIndex].x += bossClones[cloneUpdateIndex].velocityX;
+				bossClones[cloneUpdateIndex].y += bossClones[cloneUpdateIndex].velocityY;
+
+				// 画面の外に出たら消す
+				if (bossClones[cloneUpdateIndex].x < 0.0f || bossClones[cloneUpdateIndex].x > 1920.0f ||
+					bossClones[cloneUpdateIndex].y < 0.0f || bossClones[cloneUpdateIndex].y > 1180.0f) {
+
+					bossClones[cloneUpdateIndex].isExist = 0;
+				}
+			}
+
+			// 本物が爆弾を置いたタイミングで、分身は2回に1回だけ後ろに爆弾を置く
+			if (bombDropTimer == 0) {
+
+				bossCloneBombCount++;
+
+				if (bossCloneBombCount % 2 == 0) {
+
+					for (int cloneBombIndex = 0; cloneBombIndex < kMaxBossClones; cloneBombIndex++) {
+
+						if (bossClones[cloneBombIndex].isExist) {
+							placeMineBomb(
+								bossClones[cloneBombIndex].x - bossClones[cloneBombIndex].velocityX * 1.5f,
+								bossClones[cloneBombIndex].y - bossClones[cloneBombIndex].velocityY * 1.5f,
+								45);
+						}
+					}
+				}
+			}
+
+			// 突進のカウントダウン
 			bossAttackTimer--;
 
 			if (bossX - bossRadius < 0.0f ||
@@ -1090,8 +1771,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				bossY + bossRadius > 1180.0f ||
 				bossAttackTimer <= 0) {
 
+				// 画面の外に出ないように戻す
+				if (bossX < bossRadius) {
+					bossX = bossRadius;
+				}
+				if (bossX > 1920.0f - bossRadius) {
+					bossX = 1920.0f - bossRadius;
+				}
+				if (bossY < bossRadius) {
+					bossY = bossRadius;
+				}
+				if (bossY > 1180.0f - bossRadius) {
+					bossY = 1180.0f - bossRadius;
+				}
+
 				afterImageTimer = 0;
 
+				// 分身を消す
+				for (int cloneEndIndex = 0; cloneEndIndex < kMaxBossClones; cloneEndIndex++) {
+					bossClones[cloneEndIndex].isExist = 0;
+				}
+
+				// 硬直へ
 				bossState = 3;
 				bossAttackTimer = 60;
 			}
@@ -1100,6 +1801,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		else if (bossState == 3) {
 
 			bossAttackTimer--;
+
+			// 突進が終わったあと、元の高さに戻っていく
+			bossY += (295.0f - bossY) * 0.06f;
 
 			if (bossAttackTimer <= 0) {
 				bossState = 4;
@@ -1155,7 +1859,54 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			if (bossAttackTimer <= 0) {
 				bossState = 0;
-				bossAttackTimer = 180;
+				// bossAttackTimer = 180;
+				bossAttackTimer = (bossPhase == 2) ? 90 : 180;
+			}
+		}
+
+		// 召喚（赤い敵を出す）
+		else if (bossState == 5) {
+
+			// 画面の上のほうのまん中へ移動する
+			bossX += (960.0f - bossX) * 0.08f;
+			bossY += (260.0f - bossY) * 0.08f;
+
+			// 一定間隔で赤い敵を出す（4体）
+			bossSummonTimer++;
+
+			if (bossSummonTimer >= 22 && bossSummonCount < 4) {
+
+				bossSummonTimer = 0;
+				bossSummonCount++;
+
+				// 空いてる枠に召喚する
+				for (int summonSpawnIndex = 0; summonSpawnIndex < kMaxSummons; summonSpawnIndex++) {
+
+					if (!summons[summonSpawnIndex].isExist) {
+
+						// ボスの位置からランダムな向きに飛び出す
+						float summonAngle = (float)(rand() % 628) / 100.0f;
+
+						summons[summonSpawnIndex].x = bossX;
+						summons[summonSpawnIndex].y = bossY;
+						summons[summonSpawnIndex].velocityX = cosf(summonAngle) * 14.0f;
+						summons[summonSpawnIndex].velocityY = sinf(summonAngle) * 14.0f;
+						summons[summonSpawnIndex].life = 300;
+						summons[summonSpawnIndex].isExist = 1;
+
+						screenShakeTimer = 4;
+
+						break;
+					}
+				}
+			}
+
+			bossAttackTimer--;
+
+			if (bossAttackTimer <= 0) {
+				// 召喚が終わったら、硬直→回転攻撃へつなぐ
+				bossState = 3;
+				bossAttackTimer = 60;
 			}
 		}
 
@@ -1176,6 +1927,65 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		else {
 			bossAuraRadius = 0.0f;
 			bossAuraAlpha = 0.0f;
+		}
+
+		// 召喚された敵（赤）の更新
+		for (int summonUpdateIndex = 0; summonUpdateIndex < kMaxSummons; summonUpdateIndex++) {
+
+			if (!summons[summonUpdateIndex].isExist) {
+				continue;
+			}
+
+			// 飛び出したあとは、ゆっくりプレイヤーに近づく
+			summons[summonUpdateIndex].velocityX *= 0.9f;
+			summons[summonUpdateIndex].velocityY *= 0.9f;
+
+			float summonDx = playerX - summons[summonUpdateIndex].x;
+			float summonDy = playerY - summons[summonUpdateIndex].y;
+			float summonLength = sqrtf(summonDx * summonDx + summonDy * summonDy);
+
+			summons[summonUpdateIndex].x += summons[summonUpdateIndex].velocityX;
+			summons[summonUpdateIndex].y += summons[summonUpdateIndex].velocityY;
+
+			if (summonLength > 0.0f) {
+				summons[summonUpdateIndex].x += summonDx / summonLength * 2.5f;
+				summons[summonUpdateIndex].y += summonDy / summonLength * 2.5f;
+			}
+
+			// プレイヤーが触れたら仲間（青）になる
+			if (summonLength < playerRadius + kStageEnemyRadius) {
+
+				// 空いてる枠に仲間として入れる
+				for (int summonAllyIndex = 0; summonAllyIndex < kMaxStageEnemies; summonAllyIndex++) {
+
+					// 空きか、ステージで集められなかった赤い敵の枠を使う
+					if (!stageEnemies[summonAllyIndex].isAlly) {
+
+						stageEnemies[summonAllyIndex].x = summons[summonUpdateIndex].x;
+						stageEnemies[summonAllyIndex].y = summons[summonUpdateIndex].y;
+						stageEnemies[summonAllyIndex].velocityX = 0.0f;
+						stageEnemies[summonAllyIndex].velocityY = 0.0f;
+						stageEnemies[summonAllyIndex].wanderTimer = 0;
+						stageEnemies[summonAllyIndex].flash = 0;
+						stageEnemies[summonAllyIndex].shootTimer = 20 + rand() % 60;
+						stageEnemies[summonAllyIndex].isAlly = 1;
+						stageEnemies[summonAllyIndex].isExist = 1;
+
+						break;
+					}
+				}
+
+				summons[summonUpdateIndex].isExist = 0;
+				continue;
+			}
+
+			// 放っておくと自爆する
+			summons[summonUpdateIndex].life--;
+
+			if (summons[summonUpdateIndex].life <= 0) {
+				placeMineBomb(summons[summonUpdateIndex].x, summons[summonUpdateIndex].y, 30);
+				summons[summonUpdateIndex].isExist = 0;
+			}
 		}
 
 		// currentFrameのカウント
@@ -1875,6 +2685,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 					beams[beamUpdateIndex].isShot = 0;
 
+					// ボスのシールドを減らす
+					damageBossShield(kBeamDamage);
+
 					screenShakeTimer = 8;
 					Controller::SetVibration(60000, 60000);
 					vibrationTimer = 3;
@@ -1955,6 +2768,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					along <= lasers[laserUpdateIndex].length + bossRadius &&
 					side * side <= bossRadius * bossRadius &&
 					!lasers[laserUpdateIndex].sparkMade) {
+
+					// ボスのシールドを減らす
+					damageBossShield(kLaserDamage);
 
 					screenShakeTimer = 8;
 					Controller::SetVibration(60000, 60000);
@@ -2274,7 +3090,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		// ボス
-		unsigned int bossColor = RED;
+		// unsigned int bossColor = RED;
+		unsigned int bossColor = (bossPhase == 2) ? 0xAA00FFFF : RED;
 
 		if (bossState == 1 || bossState == 2) {
 			bossColor = WHITE;
@@ -2510,10 +3327,49 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			kFillModeSolid
 		);
 
+		// 分身の描画（ボスと同じ四角形、色だけ紫がかった半透明）
+		for (int cloneDrawIndex = 0; cloneDrawIndex < kMaxBossClones; cloneDrawIndex++) {
+
+			if (!bossClones[cloneDrawIndex].isExist) {
+				continue;
+			}
+
+			float cloneCornerX[4] = {};
+			float cloneCornerY[4] = {};
+
+			for (int cloneCornerIndex = 0; cloneCornerIndex < 4; cloneCornerIndex++) {
+
+				cloneCornerX[cloneCornerIndex] =
+					bossClones[cloneDrawIndex].x + localX[cloneCornerIndex] * bossCos -
+					localY[cloneCornerIndex] * bossSin;
+
+				cloneCornerY[cloneCornerIndex] =
+					bossClones[cloneDrawIndex].y + localX[cloneCornerIndex] * bossSin +
+					localY[cloneCornerIndex] * bossCos;
+			}
+
+			Novice::DrawTriangle(
+				(int)cloneCornerX[0] + screenShakeX, (int)cloneCornerY[0] + screenShakeY,
+				(int)cloneCornerX[1] + screenShakeX, (int)cloneCornerY[1] + screenShakeY,
+				(int)cloneCornerX[2] + screenShakeX, (int)cloneCornerY[2] + screenShakeY,
+				0xAA66FFAA,
+				kFillModeSolid
+			);
+
+			Novice::DrawTriangle(
+				(int)cloneCornerX[0] + screenShakeX, (int)cloneCornerY[0] + screenShakeY,
+				(int)cloneCornerX[2] + screenShakeX, (int)cloneCornerY[2] + screenShakeY,
+				(int)cloneCornerX[3] + screenShakeX, (int)cloneCornerY[3] + screenShakeY,
+				0xAA66FFAA,
+				kFillModeSolid
+			);
+		}
+
 		// スローモーションの更新
 		if (slowMotionTimer > 0) {
 			slowMotionTimer--;
-		} else {
+		}
+		else {
 			gameSpeed = 1.0f;
 		}
 
@@ -2820,6 +3676,42 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 召喚された敵（赤）の描画
+		for (int summonDrawIndex = 0; summonDrawIndex < kMaxSummons; summonDrawIndex++) {
+
+			if (!summons[summonDrawIndex].isExist) {
+				continue;
+			}
+
+			// 縁
+			Novice::DrawEllipse(
+				(int)summons[summonDrawIndex].x + screenShakeX,
+				(int)summons[summonDrawIndex].y + screenShakeY,
+				(int)kStageEnemyRadius + 3,
+				(int)kStageEnemyRadius + 3,
+				0.0f,
+				0x990000FF,
+				kFillModeSolid
+			);
+
+			// 本体（自爆が近づくと点滅する）
+			unsigned int summonColor = 0xFF2222FF;
+
+			if (summons[summonDrawIndex].life < 60 && summons[summonDrawIndex].life / 5 % 2 == 0) {
+				summonColor = WHITE;
+			}
+
+			Novice::DrawEllipse(
+				(int)summons[summonDrawIndex].x + screenShakeX,
+				(int)summons[summonDrawIndex].y + screenShakeY,
+				(int)kStageEnemyRadius,
+				(int)kStageEnemyRadius,
+				0.0f,
+				summonColor,
+				kFillModeSolid
+			);
+		}
+
 		// プレイヤーの描画
 		Novice::DrawSprite(
 			(int)(playerX - 52) + screenShakeX,
@@ -2918,7 +3810,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				currentShieldWidth,
 				shieldBarHeight,
 				0.0f,
-				0x00CCFFFF,
+				// 0x00CCFFFF,
+				(bossPhase == 2) ? 0xFF66CCFF : 0x00CCFFFF,
 				kFillModeSolid
 			);
 		}
@@ -2942,6 +3835,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			bossShield,
 			kBossShieldMax
 		);
+
+		// 今の形態
+		Novice::ScreenPrintf(shieldBarX + shieldBarWidth + 20, shieldBarY - 25, "FORM : %d", bossPhase);
 
 		// UI表示
 		Novice::ScreenPrintf(10, 10, "Move : WASD (Free Movement)");
