@@ -276,6 +276,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int bakuhatuTexture = Novice::LoadTexture("./Resources/bakuhatu.png");
 	int enTexture = Novice::LoadTexture("./Resources/en.png");
 	int namiTexture = Novice::LoadTexture("./Resources/nami.png");
+
+	int bossBgm = Novice::LoadAudio("./Resources/dopa3.wav");
 	/*int hikariTexture = Novice::LoadTexture("./Resources/hikari.png");
 	int flashTexture = Novice::LoadTexture("./Resources/flash.png");*/
 
@@ -290,7 +292,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int bossTrailTimer = 0;
 
 	// ボスのシールド
-	const int kBossShieldMax = 100;
+	const int kBossShieldMax = 1800;
 	int bossShield = kBossShieldMax;
 
 	// ボスの形態（1:第1形態 2:第2形態）
@@ -307,7 +309,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int bossRotLaserHit = 0;               // 1 = この攻撃でプレイヤーに当たった
 	// const int kRotLaserWarningFrames = 60;   // 予告線が出ている時間
 	const int kRotLaserWarningFrames = 90;   // 溜め＋予告線が出ている時間
-	const int kRotLaserFireFrames = 240;     // レーザーが回っている時間（半周）
+	const int kRotLaserFireFrames = 120;     // レーザーが回っている時間（半周）
 	const float kRotLaserWidth = 110.0f;     // レーザーの太さ（極太）
 	const float kRotLaserLength = 2600.0f;   // レーザーの長さ（画面の外まで届く）
 	const float kRotLaserCenterX = 960.0f;   // レーザー中にボスがいる位置（画面のまん中）
@@ -1148,6 +1150,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 				scene = kSceneBoss;
 
+				// ボス戦BGMを再生（ループあり・音量50%）
+				Novice::PlayAudio(bossBgm, 1, 0.5f);
+
 				// 仲間をボス戦のプレイヤーの後ろに並べる
 				resetFollow(playerX, playerY);
 				int bossAllyIndex = 0;
@@ -1481,7 +1486,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			if (shieldBreakEffectTimer == 0 && bossPhase == 1 && bossShield <= 0) {
 
 				bossPhase = 2;
-				bossShield = kBossShieldMax;   // シールドを満タンに戻す
+				bossShield = kBossShieldMax+500;   // シールドを満タンに戻す
 				bossShieldBreakTimer = 0;
 
 				// 攻撃を最初からやり直す
