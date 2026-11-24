@@ -8,6 +8,12 @@
 
 const char kWindowTitle[] = "TD1_2回目!!!";
 
+enum SCENE
+{
+	SCENE_TUTORIAL,
+	SCENE_GAME,
+};
+
 // 砲台データ構造体
 struct BoxData
 {
