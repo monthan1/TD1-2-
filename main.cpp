@@ -296,6 +296,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ボスの形態（1:第1形態 2:第2形態）
 	int bossPhase = 1;
 
+	// 1 = ボスが無敵（回転レーザー中。シールドが減らない）
+	int bossIsInvincible = 0;
+
+	// 回転レーザー（シールドが半分以下になったら、各形態で1回だけ使う）
+	int bossRotLaserUsed = 0;              // 今の形態でもう使ったか
+	int bossRotLaserTimer = 0;
+	float bossRotLaserAngle = 0.0f;        // 1本目のレーザーの向き（2本目は反対側）
+	float bossRotLaserDir = 1.0f;          // 回る向き（1:時計回り、-1:反時計回り）
+	int bossRotLaserHit = 0;               // 1 = この攻撃でプレイヤーに当たった
+	// const int kRotLaserWarningFrames = 60;   // 予告線が出ている時間
+	const int kRotLaserWarningFrames = 90;   // 溜め＋予告線が出ている時間
+	const int kRotLaserFireFrames = 240;     // レーザーが回っている時間（半周）
+	const float kRotLaserWidth = 110.0f;     // レーザーの太さ（極太）
+	const float kRotLaserLength = 2600.0f;   // レーザーの長さ（画面の外まで届く）
+	const float kRotLaserCenterX = 960.0f;   // レーザー中にボスがいる位置（画面のまん中）
+	const float kRotLaserCenterY = 590.0f;
+
 	// シールドブレイク
 	int bossShieldBreakTimer = 0;
 
@@ -314,6 +331,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const int kBeamDamage = 5;     // 弾(ブラスターの弾)が当たったときのダメージ
 	const int kLaserDamage = 10;   // レーザーが当たったときのダメージ
 	auto damageBossShield = [&](int damage) {
+
+		// 無敵中はダメージを受けない
+		if (bossIsInvincible) {
+			return;
+		}
 
 		if (bossShield > 0) {
 			bossShield -= damage;
@@ -1466,6 +1488,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				bossState = 0;
 				bossAttackTimer = 60;
 				bossIsCloneCharge = 0;
+				bossRotLaserUsed = 0;
+				bossIsInvincible = 0;
 
 				// 第2形態は横の動きが速い（向きはそのまま）
 				if (bossSpeedX > 0.0f) {
@@ -1485,9 +1509,46 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// シールドが半分以下になったら、今の攻撃を中断して無敵になり、回転レーザーを使う
+		if (!bossRotLaserUsed && bossShield > 0 && bossShield <= kBossShieldMax / 2 && bossState != 6) {
+
+			bossRotLaserUsed = 1;
+			bossIsInvincible = 1;
+			bossState = 6;
+			bossRotLaserTimer = 0;
+			bossRotLaserHit = 0;
+			bossIsCloneCharge = 0;
+			bossRotLaserDir = (rand() % 2 == 0) ? 1.0f : -1.0f;
+
+			// 画面の上のまん中から見て、プレイヤーより少し手前の向きから回り始める
+			bossRotLaserAngle = atan2f(playerY - kRotLaserCenterY, playerX - kRotLaserCenterX) - bossRotLaserDir * 1.0f;
+
+			// 突進中の分身は消す
+			for (int rotStartCloneIndex = 0; rotStartCloneIndex < kMaxBossClones; rotStartCloneIndex++) {
+				bossClones[rotStartCloneIndex].isExist = 0;
+			}
+
+			screenShakeTimer = 20;
+		}
+
 		// ボスの移動・突進処理 
 
 		if (bossState == 0) {
+
+			// シールドが半分以下になったら、回転レーザーを使う
+			if (!bossRotLaserUsed && bossShield > 0 && bossShield <= kBossShieldMax / 2) {
+
+				bossRotLaserUsed = 1;
+				bossState = 6;
+				bossRotLaserTimer = 0;
+				bossRotLaserHit = 0;
+				bossRotLaserDir = (rand() % 2 == 0) ? 1.0f : -1.0f;
+
+				// 画面の上のまん中から見て、プレイヤーより少し手前の向きから回り始める
+				bossRotLaserAngle = atan2f(playerY - kRotLaserCenterY, playerX - kRotLaserCenterX) - bossRotLaserDir * 1.0f;
+
+				screenShakeTimer = 20;
+			}
 
 			// ふわふわ動くためのカウント
 			ufoMoveTimer++;
@@ -1910,6 +1971,77 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 回転レーザー（赤い極太レーザーが2本、反対向きに半周する）
+		else if (bossState == 6) {
+
+			bossRotLaserTimer++;
+
+			// 画面のまん中へ移動する
+			// bossX += (960.0f - bossX) * 0.1f;
+			// bossY += (300.0f - bossY) * 0.1f;
+			bossX += (kRotLaserCenterX - bossX) * 0.1f;
+			bossY += (kRotLaserCenterY - bossY) * 0.1f;
+
+			// 溜めの終わりが近づくと、ボスが震えるように画面が小さく揺れる
+			if (bossRotLaserTimer > kRotLaserWarningFrames - 40 &&
+				bossRotLaserTimer <= kRotLaserWarningFrames &&
+				bossRotLaserTimer % 6 == 0) {
+				screenShakeTimer = 3;
+			}
+
+			// 発射の瞬間は大きく揺らす
+			if (bossRotLaserTimer == kRotLaserWarningFrames + 1) {
+				screenShakeTimer = 15;
+			}
+
+			// 予告のあと、レーザーが回る
+			if (bossRotLaserTimer > kRotLaserWarningFrames) {
+
+				bossRotLaserAngle += bossRotLaserDir * (3.14159265f / (float)kRotLaserFireFrames);
+
+				// 発射したあと10フレームかけて、レーザーが太くなる（見た目と当たり判定を合わせる）
+				float rotHitGrow = (float)(bossRotLaserTimer - kRotLaserWarningFrames) / 10.0f;
+
+				if (rotHitGrow > 1.0f) {
+					rotHitGrow = 1.0f;
+				}
+
+				// 2本のレーザーとプレイヤーの当たり判定
+				for (int rotHitIndex = 0; rotHitIndex < 2; rotHitIndex++) {
+
+					float rotHitAngle = bossRotLaserAngle + 3.14159265f * (float)rotHitIndex;
+					float rotDirX = cosf(rotHitAngle);
+					float rotDirY = sinf(rotHitAngle);
+
+					float rotDx = playerX - bossX;
+					float rotDy = playerY - bossY;
+
+					// レーザーの向きにどれだけ進んでいるか／横にどれだけ離れているか
+					float rotAlong = rotDx * rotDirX + rotDy * rotDirY;
+					float rotSide = -rotDx * rotDirY + rotDy * rotDirX;
+
+					if (!bossRotLaserHit &&
+						rotAlong >= 0.0f &&
+						rotAlong <= kRotLaserLength &&
+						fabsf(rotSide) <= kRotLaserWidth * 0.5f * rotHitGrow + playerRadius) {
+
+						// プレイヤーに当たった（今はまだダメージの処理がないので、揺れと振動だけ）
+						bossRotLaserHit = 1;
+						screenShakeTimer = 15;
+						Controller::SetVibration(60000, 60000);
+						vibrationTimer = 3;
+					}
+				}
+			}
+
+			// 回り終わったら、硬直へ
+			if (bossRotLaserTimer >= kRotLaserWarningFrames + kRotLaserFireFrames) {
+				bossIsInvincible = 0;
+				bossState = 3;
+				bossAttackTimer = 60;
+			}
+		}
+
 		// ボスの突進準備中にオーラを大きくする
 		if (bossState == 1) {
 			bossAuraRadius += 2.0f;
@@ -2163,8 +2295,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			if (hitDx * hitDx + hitDy * hitDy < (bossRadius + 8.0f) * (bossRadius + 8.0f)) {
 
-				// ボスのシールドを減らす
-				if (bossShield > 0) {
+				// ボスのシールドを減らす（無敵中は減らさない）
+				if (bossShield > 0 && !bossIsInvincible) {
 					bossShield -= 1;
 
 					if (bossShield <= 0) {
@@ -3089,6 +3221,169 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// 無敵中はボスのまわりに青い輪を出す
+		if (bossIsInvincible) {
+
+			Novice::DrawEllipse(
+				(int)bossX + screenShakeX,
+				(int)bossY + screenShakeY,
+				(int)(bossRadius + 25.0f),
+				(int)(bossRadius + 25.0f),
+				0.0f,
+				0x66CCFFFF,
+				kFillModeWireFrame
+			);
+		}
+
+		// 回転レーザーの描画（赤い極太レーザー）
+		if (bossState == 6) {
+
+			// 溜め（レーザーを出す前に、ボスにエネルギーが集まる）
+			if (bossRotLaserTimer <= kRotLaserWarningFrames) {
+
+				// 0から1までの溜まり具合
+				float chargeRate = (float)bossRotLaserTimer / (float)kRotLaserWarningFrames;
+
+				// まわりから集まってくる光の粒（だんだん中心に寄ってくる）
+				const int kChargeDots = 16;
+
+				for (int chargeDotIndex = 0; chargeDotIndex < kChargeDots; chargeDotIndex++) {
+
+					float dotAngle = 6.2831853f * (float)chargeDotIndex / (float)kChargeDots + (float)bossRotLaserTimer * 0.12f;
+					float dotDistance = (1.0f - chargeRate) * (320.0f + (float)(chargeDotIndex % 3) * 40.0f) + 40.0f;
+
+					Novice::DrawEllipse(
+						(int)(bossX + cosf(dotAngle) * dotDistance) + screenShakeX,
+						(int)(bossY + sinf(dotAngle) * dotDistance) + screenShakeY,
+						6,
+						6,
+						0.0f,
+						(chargeDotIndex % 2 == 0) ? 0xFF4444FF : 0xFFAAAAFF,
+						kFillModeSolid
+					);
+				}
+
+				// ボスの中心の光の球（だんだん大きく、脈打つ）
+				float orbRadius = 15.0f + chargeRate * 100.0f + sinf((float)bossRotLaserTimer * 0.6f) * 6.0f * chargeRate;
+
+				Novice::DrawEllipse(
+					(int)bossX + screenShakeX,
+					(int)bossY + screenShakeY,
+					(int)orbRadius,
+					(int)orbRadius,
+					0.0f,
+					0xFF0000AA,
+					kFillModeSolid
+				);
+
+				Novice::DrawEllipse(
+					(int)bossX + screenShakeX,
+					(int)bossY + screenShakeY,
+					(int)(orbRadius * 0.5f),
+					(int)(orbRadius * 0.5f),
+					0.0f,
+					0xFFCCCCFF,
+					kFillModeSolid
+				);
+			}
+
+			for (int rotDrawIndex = 0; rotDrawIndex < 2; rotDrawIndex++) {
+
+				float rotDrawAngle = bossRotLaserAngle + 3.14159265f * (float)rotDrawIndex;
+				float rotDrawDirX = cosf(rotDrawAngle);
+				float rotDrawDirY = sinf(rotDrawAngle);
+				float rotSideX = -rotDrawDirY;
+				float rotSideY = rotDrawDirX;
+
+				float rotStartX = bossX + (float)screenShakeX;
+				float rotStartY = bossY + (float)screenShakeY;
+				float rotEndX = rotStartX + rotDrawDirX * kRotLaserLength;
+				float rotEndY = rotStartY + rotDrawDirY * kRotLaserLength;
+
+				if (bossRotLaserTimer <= kRotLaserWarningFrames) {
+
+					// 予告線（点滅する。レーザーが通る太さの範囲を細い線で見せる）
+					// if ((bossRotLaserTimer / 6) % 2 == 0) {
+					if ((bossRotLaserTimer / 6) % 2 == 0 || bossRotLaserTimer > kRotLaserWarningFrames - 20) {
+
+						float rotHalf = kRotLaserWidth * 0.5f;
+
+						Novice::DrawLine((int)rotStartX, (int)rotStartY, (int)rotEndX, (int)rotEndY, 0xFF0000FF);
+						Novice::DrawLine((int)(rotStartX + rotSideX * rotHalf), (int)(rotStartY + rotSideY * rotHalf),
+							(int)(rotEndX + rotSideX * rotHalf), (int)(rotEndY + rotSideY * rotHalf), 0xFF000088);
+						Novice::DrawLine((int)(rotStartX - rotSideX * rotHalf), (int)(rotStartY - rotSideY * rotHalf),
+							(int)(rotEndX - rotSideX * rotHalf), (int)(rotEndY - rotSideY * rotHalf), 0xFF000088);
+					}
+				}
+				else {
+
+					// 外側の赤い太いレーザー
+					// 発射したあと10フレームかけて太くなる
+					float rotGrow = (float)(bossRotLaserTimer - kRotLaserWarningFrames) / 10.0f;
+
+					if (rotGrow > 1.0f) {
+						rotGrow = 1.0f;
+					}
+
+					float rotOuter = kRotLaserWidth * 0.5f * rotGrow;
+
+					// レーザーの後ろのぼかし（プレイヤーのレーザーと同じ bokasi2Texture を、レーザーの向きに合わせて伸ばして描く）
+					float rotGlowHalfWidth = rotOuter * 1.8f;   // 光の太さの半分
+					float rotGlowPad = 30.0f;                   // レーザーの前後にはみ出す長さ
+
+					float rotGlowStartX = rotStartX - rotDrawDirX * rotGlowPad;
+					float rotGlowStartY = rotStartY - rotDrawDirY * rotGlowPad;
+					float rotGlowEndX = rotEndX + rotDrawDirX * rotGlowPad;
+					float rotGlowEndY = rotEndY + rotDrawDirY * rotGlowPad;
+
+					Novice::DrawQuad(
+						(int)(rotGlowStartX - rotSideX * rotGlowHalfWidth), (int)(rotGlowStartY - rotSideY * rotGlowHalfWidth),  // 左上
+						(int)(rotGlowEndX - rotSideX * rotGlowHalfWidth), (int)(rotGlowEndY - rotSideY * rotGlowHalfWidth),      // 右上
+						(int)(rotGlowStartX + rotSideX * rotGlowHalfWidth), (int)(rotGlowStartY + rotSideY * rotGlowHalfWidth),  // 左下
+						(int)(rotGlowEndX + rotSideX * rotGlowHalfWidth), (int)(rotGlowEndY + rotSideY * rotGlowHalfWidth),      // 右下
+						0, 0, 2400, 100,
+						bokasi2Texture,
+						0xFF3333AA
+					);
+
+					Novice::DrawTriangle(
+						(int)(rotStartX + rotSideX * rotOuter), (int)(rotStartY + rotSideY * rotOuter),
+						(int)(rotEndX + rotSideX * rotOuter), (int)(rotEndY + rotSideY * rotOuter),
+						(int)(rotEndX - rotSideX * rotOuter), (int)(rotEndY - rotSideY * rotOuter),
+						0xFF0000CC,
+						kFillModeSolid
+					);
+
+					Novice::DrawTriangle(
+						(int)(rotStartX + rotSideX * rotOuter), (int)(rotStartY + rotSideY * rotOuter),
+						(int)(rotEndX - rotSideX * rotOuter), (int)(rotEndY - rotSideY * rotOuter),
+						(int)(rotStartX - rotSideX * rotOuter), (int)(rotStartY - rotSideY * rotOuter),
+						0xFF0000CC,
+						kFillModeSolid
+					);
+
+					// 中心の明るい部分
+					float rotInner = kRotLaserWidth * 0.2f * rotGrow;
+
+					Novice::DrawTriangle(
+						(int)(rotStartX + rotSideX * rotInner), (int)(rotStartY + rotSideY * rotInner),
+						(int)(rotEndX + rotSideX * rotInner), (int)(rotEndY + rotSideY * rotInner),
+						(int)(rotEndX - rotSideX * rotInner), (int)(rotEndY - rotSideY * rotInner),
+						0xFF9999FF,
+						kFillModeSolid
+					);
+
+					Novice::DrawTriangle(
+						(int)(rotStartX + rotSideX * rotInner), (int)(rotStartY + rotSideY * rotInner),
+						(int)(rotEndX - rotSideX * rotInner), (int)(rotEndY - rotSideY * rotInner),
+						(int)(rotStartX - rotSideX * rotInner), (int)(rotStartY - rotSideY * rotInner),
+						0xFF9999FF,
+						kFillModeSolid
+					);
+				}
+			}
+		}
+
 		// ボス
 		// unsigned int bossColor = RED;
 		unsigned int bossColor = (bossPhase == 2) ? 0xAA00FFFF : RED;
@@ -3838,6 +4133,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		// 今の形態
 		Novice::ScreenPrintf(shieldBarX + shieldBarWidth + 20, shieldBarY - 25, "FORM : %d", bossPhase);
+
+		if (bossIsInvincible) {
+			Novice::ScreenPrintf(shieldBarX + shieldBarWidth + 20, shieldBarY, "INVINCIBLE");
+		}
 
 		// UI表示
 		Novice::ScreenPrintf(10, 10, "Move : WASD (Free Movement)");
