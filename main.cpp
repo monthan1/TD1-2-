@@ -232,7 +232,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 爆発画像の拡大率
 	const float kExplosionScale = 2.5f;
 	const int kExplosionHalfSize = (int)(62.0f * kExplosionScale);
-
 	// ボスのデータ
 	float bossX = 960.0f;
 	float bossY = 295.0f;
@@ -255,6 +254,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// スローモーション演出
 	float gameSpeed = 1.0f;
 	int slowMotionTimer = 0;
+
 	const int kSlowMotionMax = 30;
 
 	// boss
