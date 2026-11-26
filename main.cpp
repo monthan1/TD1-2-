@@ -189,6 +189,7 @@ struct StageEnemy
 	int shootTimer;
 	int isAlly;
 	int isExist;
+	int isSummonedAlly;   // 1 = 四角で召喚した仲間（極太レーザーを撃つときに消費される）
 };
 
 // 集めちゃダメな敵の構造体（呼びかけに触れると爆発する）
@@ -245,6 +246,16 @@ struct SummonEnemy
 	int isExist;
 };
 
+// ボスに与えたダメージの数字
+struct DamagePopup
+{
+	float x;
+	float y;
+	int value;
+	int life;
+	int isExist;
+};
+
 // 残像の共通描画処理
 void DrawAfterImage(float x, float y, float radius, int life, int maxLife, unsigned int baseColor)
 {
@@ -269,6 +280,14 @@ void DrawAfterImage(float x, float y, float radius, int life, int maxLife, unsig
 	);
 }
 
+// スタートボタン用の5x7ドット文字（S, T, A, R だけ）。1行が1文字で、1行ぶんの5ビットが横の点のON/OFF
+static const unsigned char kPixelFont[4][7] = {
+	{ 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E },   // S
+	{ 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04 },   // T
+	{ 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 },   // A
+	{ 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 },   // R
+};
+
 // Windowsアプリでのエントリーポイント
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
@@ -290,6 +309,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int bakuhatuTexture = Novice::LoadTexture("./Resources/bakuhatu.png");
 	int enTexture = Novice::LoadTexture("./Resources/en.png");
 	int namiTexture = Novice::LoadTexture("./Resources/nami.png");
+
+	// ダメージの数字の画像（0〜9）
+	int count0Texture = Novice::LoadTexture("./Resources/count0.png");
+	int count1Texture = Novice::LoadTexture("./Resources/count1.png");
+	int count2Texture = Novice::LoadTexture("./Resources/count2.png");
+	int count3Texture = Novice::LoadTexture("./Resources/count3.png");
+	int count4Texture = Novice::LoadTexture("./Resources/count4.png");
+	int count5Texture = Novice::LoadTexture("./Resources/count5.png");
+	int count6Texture = Novice::LoadTexture("./Resources/count6.png");
+	int count7Texture = Novice::LoadTexture("./Resources/count7.png");
+	int count8Texture = Novice::LoadTexture("./Resources/count8.png");
+	int count9Texture = Novice::LoadTexture("./Resources/count9.png");
+	int countTextures[10] = { count0Texture, count1Texture, count2Texture, count3Texture, count4Texture, count5Texture, count6Texture, count7Texture, count8Texture, count9Texture };
 
 	int bossBgm = Novice::LoadAudio("./Resources/dopa3.wav");
 	int bossBgmVoice = -1;   // 再生中のBGMのハンドル（SHIFTスキップで止めるために保存）
@@ -408,11 +440,42 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	const int kSlowMotionMax = 30;
 
+	// ダメージの数字の設定（count0.png〜count9.png）
+	const int kCountImageW = 64;                 // 数字1文字の画像の横幅（画像の大きさに合わせて変える）
+	const int kCountImageH = 64;                 // 数字1文字の画像の高さ
+	const float kCountDrawScale = 1.0f;          // 数字を描く大きさ（1.0 = 画像のまま）
+	const float kCountDigitSpacing = 0.5f;       // 数字どうしの間隔（1.0 = 画像の横幅ぶん離す。小さいほど詰まる）
+	const int kMaxDamagePopups = 32;
+	const int kDamagePopupLife = 45;             // 数字が出ている長さ
+	const int kLaserPopupValue = 20;             // レーザーが当たったときに出す数字（表記だけで、実際のダメージとは別）
+	const int kBeamPopupValue = 10;              // 弾が当たったときに出す数字
+	const int kAllyPopupValue = 5;               // 仲間の弾が当たったときに出す数字
+	const int kMegaPopupValue = 50;              // 極太レーザーが当たっているときに出す数字
+	const int kMegaPopupInterval = 10;           // 極太レーザーは毎フレーム当たるので、この間隔で出す
+	DamagePopup damagePopups[kMaxDamagePopups] = {};
+	// ダメージの数字を1つ出す（ボスの上あたりに、少しずらして出す）
+	auto spawnDamagePopup = [&](int popupValue) {
+
+		for (int popupSpawnIndex = 0; popupSpawnIndex < kMaxDamagePopups; popupSpawnIndex++) {
+
+			if (!damagePopups[popupSpawnIndex].isExist) {
+
+				damagePopups[popupSpawnIndex].x = bossX + (float)(rand() % 121 - 60);
+				damagePopups[popupSpawnIndex].y = bossY - bossRadius - 10.0f + (float)(rand() % 41 - 20);
+				damagePopups[popupSpawnIndex].value = (popupValue > 9999) ? 9999 : popupValue;
+				damagePopups[popupSpawnIndex].life = kDamagePopupLife;
+				damagePopups[popupSpawnIndex].isExist = 1;
+				return;
+			}
+		}
+		};
+
 	// ボスのシールドを減らす（弾・レーザーが当たったときに使う）
 	const int kBeamDamage = 5;     // 弾(ブラスターの弾)が当たったときのダメージ
 	const int kLaserDamage = 10;   // レーザーが当たったときのダメージ
 	// canBreakBarrier : 1 = プレイヤーの弾（バリアを壊せる）、0 = レーザーなど（バリアに防がれる）
-	auto damageBossShield = [&](int damage, int canBreakBarrier) {
+	// popupValue : ボスの上に出す数字（0 = 出さない）
+	auto damageBossShield = [&](int damage, int canBreakBarrier, int popupValue) {
 
 		// 無敵中はダメージを受けない
 		if (bossIsInvincible) {
@@ -435,6 +498,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 
 		if (bossShield > 0) {
+
+			// シールドが減ったときだけ、ダメージの数字を出す
+			if (popupValue > 0) {
+				spawnDamagePopup(popupValue);
+			}
+
 			bossShield -= damage;
 
 			if (bossShield <= 0) {
@@ -882,7 +951,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ステージ（ボス戦前）の設定
 	const int kSceneStage = 0;
 	const int kSceneBoss = 1;
-	int scene = kSceneStage;
+	const int kSceneTitle = 2;
+	// int scene = kSceneStage;   // 最初は敵集めのステージから始めていた（仲間集めはなくしたので、タイトルから始める）
+	int scene = kSceneTitle;
+
+	// タイトル画面の設定
+	int titleTimer = 0;                          // タイトルのアニメーション用
+	int titleStartTimer = 0;                     // スタートを押してからボス戦に入るまでの点滅時間（0 = まだ押していない）
+	const int kTitleStartFrames = 30;
 
 	// ステージのプレイヤー
 	float stagePlayerX = 960.0f;
@@ -1017,6 +1093,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	for (int allyBulletInitIndex = 0; allyBulletInitIndex < kMaxAllyBullets; allyBulletInitIndex++) {
 		allyBullets[allyBulletInitIndex].isExist = 0;
 	}
+
+	// 四角の仲間召喚の設定（弾モードでダッシュ4回の軌道線が四角になったら、仲間を呼ぶ。呼んだ仲間は極太レーザーを撃つときに消費される）
+	const int kSquareAllyCount = 5;              // 四角1回で呼ぶ仲間の数（2回で10体）
+	const int kMegaLaserAllyCost = 10;           // 極太レーザーを撃つのに必要な（消費する）仲間の数
 
 	// 集めちゃダメな敵（紫）の設定
 	const int kMaxBadEnemies = 8;
@@ -1190,6 +1270,59 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		return true;
 		};
 
+	// 四角で呼んだ仲間の数を数える
+	auto countSummonedAllies = [&]() {
+
+		int triAllyTotal = 0;
+
+		for (int triCountIndex = 0; triCountIndex < kMaxStageEnemies; triCountIndex++) {
+
+			if (stageEnemies[triCountIndex].isExist && stageEnemies[triCountIndex].isAlly && stageEnemies[triCountIndex].isSummonedAlly) {
+				triAllyTotal++;
+			}
+		}
+
+		return triAllyTotal;
+		};
+
+	// 四角で呼んだ仲間を指定した数だけ消費する（極太レーザーを撃つとき）
+	auto consumeSummonedAllies = [&](int consumeCount) {
+
+		int consumed = 0;
+
+		for (int triUseIndex = 0; triUseIndex < kMaxStageEnemies && consumed < consumeCount; triUseIndex++) {
+
+			if (!stageEnemies[triUseIndex].isExist || !stageEnemies[triUseIndex].isAlly || !stageEnemies[triUseIndex].isSummonedAlly) {
+				continue;
+			}
+
+			// 消えるときの火花
+			for (int triUseSparkCount = 0; triUseSparkCount < 6; triUseSparkCount++) {
+
+				for (int triUseSparkIndex = 0; triUseSparkIndex < kMaxSparks; triUseSparkIndex++) {
+
+					if (!sparks[triUseSparkIndex].isExist) {
+
+						sparks[triUseSparkIndex].x = stageEnemies[triUseIndex].x;
+						sparks[triUseSparkIndex].y = stageEnemies[triUseIndex].y;
+						sparks[triUseSparkIndex].velocityX = static_cast<float>(rand() % 100 - 50) / 10.0f;
+						sparks[triUseSparkIndex].velocityY = static_cast<float>(rand() % 100 - 50) / 10.0f;
+						sparks[triUseSparkIndex].life = 25;
+						sparks[triUseSparkIndex].isExist = 1;
+
+						break;
+					}
+				}
+			}
+
+			stageEnemies[triUseIndex].isSummonedAlly = 0;
+			stageEnemies[triUseIndex].isAlly = 0;
+			stageEnemies[triUseIndex].isExist = 0;
+
+			consumed++;
+		}
+		};
+
 	// ボス戦の状態を、指定した形態の開始時点に戻す（1:第1形態 2:第2形態 3:第3形態）
 	auto resetBossFight = [&](int phase) {
 
@@ -1294,6 +1427,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		for (int i = 0; i < kMaxGlitchParticles; i++) { glitchParticles[i].isExist = 0; }
 		for (int i = 0; i < kMaxAllyBullets; i++) { allyBullets[i].isExist = 0; }
 		for (int i = 0; i < kMaxLines; i++) { lines[i].isExist = 0; }
+		for (int i = 0; i < kMaxDamagePopups; i++) { damagePopups[i].isExist = 0; }
 
 		for (int i = 0; i < kMaxBoxes; i++) {
 			boxes[i].isExist = 0;
@@ -1357,7 +1491,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// ボス戦は第1形態の開始状態に戻しておく（扉から入り直せるように）
 		resetBossFight(1);
 
-		scene = kSceneStage;
+		// scene = kSceneStage;   // 仲間集めのステージはなくしたので、タイトルに戻す
+		scene = kSceneTitle;
+		titleTimer = 0;
+		titleStartTimer = 0;
 
 		// BGMを止める
 		if (bossBgmVoice != -1) {
@@ -1393,6 +1530,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			stageEnemies[i].flash = 0;
 			stageEnemies[i].shootTimer = 0;
 			stageEnemies[i].isAlly = 0;
+			stageEnemies[i].isSummonedAlly = 0;
 			stageEnemies[i].isExist = 1;
 		}
 
@@ -1411,6 +1549,54 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		for (int i = 0; i < kMaxSmallExplosions; i++) {
 			smallExplosions[i].isExist = 0;
+		}
+		};
+
+	// ドット文字を描く（スタートボタン用。S, T, A, R だけ）
+	auto drawPixelText = [&](const char* text, int textX, int textY, int pixelSize, unsigned int color) {
+
+		int cursorX = textX;
+
+		for (int charIndex = 0; text[charIndex] != '\0'; charIndex++) {
+
+			char ch = text[charIndex];
+			int glyph = -1;
+
+			if (ch == 'S') {
+				glyph = 0;
+			}
+			else if (ch == 'T') {
+				glyph = 1;
+			}
+			else if (ch == 'A') {
+				glyph = 2;
+			}
+			else if (ch == 'R') {
+				glyph = 3;
+			}
+
+			if (glyph >= 0) {
+
+				for (int row = 0; row < 7; row++) {
+
+					for (int col = 0; col < 5; col++) {
+
+						if (kPixelFont[glyph][row] & (0x10 >> col)) {
+							Novice::DrawBox(
+								cursorX + col * pixelSize,
+								textY + row * pixelSize,
+								pixelSize,
+								pixelSize,
+								0.0f,
+								color,
+								kFillModeSolid
+							);
+						}
+					}
+				}
+			}
+
+			cursorX += 6 * pixelSize;
 		}
 		};
 
@@ -1446,7 +1632,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Novice::GetHitKeyStateAll(keys);
 
 		// SHIFTキーでスキップ（押すたびに：第2形態 → 第3形態 → 敵集め → 第2形態 → …）
-		if ((keys[DIK_LSHIFT] && !preKeys[DIK_LSHIFT]) || (keys[DIK_RSHIFT] && !preKeys[DIK_RSHIFT])) {
+		// if ((keys[DIK_LSHIFT] && !preKeys[DIK_LSHIFT]) || (keys[DIK_RSHIFT] && !preKeys[DIK_RSHIFT])) {
+		if (scene != kSceneTitle && ((keys[DIK_LSHIFT] && !preKeys[DIK_LSHIFT]) || (keys[DIK_RSHIFT] && !preKeys[DIK_RSHIFT]))) {
 
 			if (scene == kSceneStage || bossPhase < 2) {
 				skipToBossPhase(2);
@@ -1467,6 +1654,86 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			if (playerDeadTimer >= kPlayerDeadFrames) {
 				skipToStage();
 			}
+		}
+
+		// ==============================
+		// タイトル画面の処理
+		// ==============================
+		if (scene == kSceneTitle) {
+
+			// --- 更新処理 ---
+			titleTimer++;
+
+			// スタートボタン：キーボード（ENTER / SPACE）とコントローラー（Aボタン / STARTボタン）で押せる
+			int titleDecide = 0;
+
+			if ((keys[DIK_RETURN] && !preKeys[DIK_RETURN]) ||
+				(keys[DIK_SPACE] && !preKeys[DIK_SPACE]) ||
+				Controller::IsPressed(kPadButton10) ||
+				Controller::IsPressed(kPadButton4)) {
+				titleDecide = 1;
+			}
+
+			if (titleStartTimer == 0) {
+
+				if (titleDecide) {
+					titleStartTimer = kTitleStartFrames;
+
+					// 押した手ごたえ（コントローラーが少し振動する）
+					Controller::SetVibration(30000, 30000);
+					vibrationTimer = 8;
+				}
+			}
+			else {
+
+				titleStartTimer--;
+
+				// 点滅が終わったら、第1形態のボス戦を始める
+				if (titleStartTimer == 0) {
+					skipToBossPhase(1);
+				}
+			}
+
+			// --- 描画処理 ---
+
+			// 背景
+			Novice::DrawBox(0, 0, 1920, 1180, 0.0f, 0x0A0F1AFF, kFillModeSolid);
+
+			// スタートボタン
+			const int kButtonWidth = 520;
+			const int kButtonHeight = 120;
+			const int kButtonX = (1920 - kButtonWidth) / 2;
+			const int kButtonY = (1180 - kButtonHeight) / 2;
+
+			float buttonPulse = 0.5f + 0.5f * sinf((float)titleTimer * 0.1f);
+			unsigned int buttonFillColor = 0x66DDFF00 | (unsigned int)(60.0f + 60.0f * buttonPulse);
+
+			// 押した瞬間は、ボタンが点滅する
+			if (titleStartTimer > 0) {
+				buttonFillColor = ((titleStartTimer / 3) % 2 == 0) ? 0xFFFFFFFF : 0x2266AAFF;
+			}
+
+			Novice::DrawBox(kButtonX, kButtonY, kButtonWidth, kButtonHeight, 0.0f, buttonFillColor, kFillModeSolid);
+			Novice::DrawBox(kButtonX, kButtonY, kButtonWidth, kButtonHeight, 0.0f, 0x66DDFFFF, kFillModeWireFrame);
+
+			const int kStartPixel = 8;
+			int startTextWidth = 5 * 6 * kStartPixel - kStartPixel;
+
+			drawPixelText("START", (1920 - startTextWidth) / 2, kButtonY + (kButtonHeight - 7 * kStartPixel) / 2, kStartPixel, 0xFFFFFFFF);
+
+			// 操作の説明
+			Novice::ScreenPrintf(740, kButtonY + kButtonHeight + 30, "ENTER / SPACE / A BUTTON / START BUTTON : START");
+			Novice::ScreenPrintf(740, kButtonY + kButtonHeight + 50, "ESC : QUIT");
+
+			// フレームの終了
+			Novice::EndFrame();
+
+			// ESCキーが押されたらループを抜ける
+			if (preKeys[DIK_ESCAPE] == 0 && keys[DIK_ESCAPE] != 0) {
+				break;
+			}
+
+			continue;
 		}
 
 		// ==============================
@@ -2708,61 +2975,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			bossY += (295.0f - bossY) * 0.06f;
 
 			if (bossAttackTimer <= 0) {
-				bossState = 4;
-				bossAttackTimer = 120;
-				bossSpinTimer = 0;
-			}
-		}
-
-		else if (bossState == 4) {
-
-			// その場で回転
-			bossRotationAngle += 0.18f;
-
-			// 爆弾を投げるタイマー
-			bossSpinTimer++;
-
-			if (bossSpinTimer >= 18) {
-
-				bossSpinTimer = 0;
-
-				for (int bombSpawnIndex = 0;
-					bombSpawnIndex < kMaxBombs;
-					bombSpawnIndex++) {
-
-					if (!bombs[bombSpawnIndex].isExist) {
-
-						float dx = playerX - bossX;
-						float dy = playerY - bossY;
-
-						float length = sqrtf(dx * dx + dy * dy);
-
-						if (length > 0.0f) {
-							bombs[bombSpawnIndex].velocityX = dx / length * 7.0f;
-							bombs[bombSpawnIndex].velocityY = dy / length * 7.0f;
-						}
-
-						bombs[bombSpawnIndex].x = bossX;
-						bombs[bombSpawnIndex].y = bossY;
-						bombs[bombSpawnIndex].isFalling = 1;
-						bombs[bombSpawnIndex].isGlitch = 1;
-
-						bombs[bombSpawnIndex].timer = 55;
-						bombs[bombSpawnIndex].life = 0;
-						bombs[bombSpawnIndex].exploded = 0;
-						bombs[bombSpawnIndex].isExist = 1;
-
-						break;
-					}
-				}
-			}
-
-			bossAttackTimer--;
-
-			if (bossAttackTimer <= 0) {
+				// 以前はここでグリッチ爆弾を投げる回転攻撃（120フレーム）が入っていた。攻撃の間隔が変わらないよう、そのぶんも待機に足す
 				bossState = 0;
-				// bossAttackTimer = 180;
-				bossAttackTimer = (bossPhase == 1) ? 180 : (bossPhase == 2) ? 90 : 70;
+				bossAttackTimer = ((bossPhase == 1) ? 180 : (bossPhase == 2) ? 90 : 70) + 120;
 			}
 		}
 
@@ -3285,6 +3500,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			attackType = 2;
 		}
 
+		// コントローラーはXボタンで切り替える（弾 ⇔ レーザー）
+		if (Controller::IsPressed(kPadButton12)) {
+			attackType = (attackType == 1) ? 2 : 1;
+		}
+
 		if (moveX != 0.0f || moveY != 0.0f) {
 
 			playerAngle = atan2f(moveY, moveX);
@@ -3310,6 +3530,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				bossAllyTotalNow++;
 			}
 		}
+
+		// 画面に表示する仲間の数
+		allyCount = bossAllyTotalNow;
 
 		// 仲間の更新処理（プレイヤーの後ろについていき、ボスに向かって弾を撃つ）
 		int bossAllyUpdateIndex = 0;
@@ -3414,6 +3637,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				// ボスのシールドを減らす（無敵中・バリア中は減らさない）
 				if (bossShield > 0 && !bossIsInvincible && bossBarrier <= 0) {
 					bossShield -= 1;
+					spawnDamagePopup(kAllyPopupValue);
 
 					if (bossShield <= 0) {
 						bossShield = 0;
@@ -3643,8 +3867,68 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					currentAttackIndex = 0;
 					attackTimer = 10;
 
+					// 弾モードで4本の軌道線が「四角」になったら、仲間を召喚する（呼んだ仲間は、極太レーザーを撃つまで残る）
+					{
+						float squareCenterX = 0.0f;
+						float squareCenterY = 0.0f;
+
+						if (attackType == 1 && detectSquareDash(squareCenterX, squareCenterY)) {
+
+							int squareSpawned = 0;
+							const int squareFirstLine = lineCount - 4;
+
+							for (int squareSpawnIndex = 0; squareSpawnIndex < kMaxStageEnemies && squareSpawned < kSquareAllyCount; squareSpawnIndex++) {
+
+								// すでに仲間になっている枠は使わない
+								if (stageEnemies[squareSpawnIndex].isAlly) {
+									continue;
+								}
+
+								// 四角の4つの角から順番に出す（出たあとは、プレイヤーの後ろの群れに飛んでいく）
+								int squareCorner = squareSpawned % 4;
+								float squareCornerX = lines[squareFirstLine + squareCorner].startX;
+								float squareCornerY = lines[squareFirstLine + squareCorner].startY;
+
+								stageEnemies[squareSpawnIndex].x = squareCornerX;
+								stageEnemies[squareSpawnIndex].y = squareCornerY;
+								stageEnemies[squareSpawnIndex].velocityX = 0.0f;
+								stageEnemies[squareSpawnIndex].velocityY = 0.0f;
+								stageEnemies[squareSpawnIndex].wanderTimer = 0;
+								stageEnemies[squareSpawnIndex].flash = 0;
+								stageEnemies[squareSpawnIndex].shootTimer = 20 + rand() % 60;
+								stageEnemies[squareSpawnIndex].isAlly = 1;
+								stageEnemies[squareSpawnIndex].isSummonedAlly = 1;
+								stageEnemies[squareSpawnIndex].isExist = 1;
+
+								// 召喚の火花
+								for (int squareSparkCount = 0; squareSparkCount < 8; squareSparkCount++) {
+
+									for (int squareSparkIndex = 0; squareSparkIndex < kMaxSparks; squareSparkIndex++) {
+
+										if (!sparks[squareSparkIndex].isExist) {
+
+											sparks[squareSparkIndex].x = squareCornerX;
+											sparks[squareSparkIndex].y = squareCornerY;
+											sparks[squareSparkIndex].velocityX = static_cast<float>(rand() % 100 - 50) / 10.0f;
+											sparks[squareSparkIndex].velocityY = static_cast<float>(rand() % 100 - 50) / 10.0f;
+											sparks[squareSparkIndex].life = 30;
+											sparks[squareSparkIndex].isExist = 1;
+
+											break;
+										}
+									}
+								}
+
+								squareSpawned++;
+							}
+						}
+					}
+
 					// レーザーモードで四角を作っていたら、普通の発射ではなく溜め技にする
-					if (attackType == 2 && detectSquareDash(megaLaserX, megaLaserY)) {
+					// 四角で呼んだ仲間が10体いて、四角を作っていたら、仲間を使って極太レーザーを撃つ
+					if (attackType == 2 && countSummonedAllies() >= kMegaLaserAllyCost && detectSquareDash(megaLaserX, megaLaserY)) {
+
+						consumeSummonedAllies(kMegaLaserAllyCost);
 
 						megaLaserState = 1;
 						megaLaserTimer = 0;
@@ -3690,6 +3974,22 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (megaLaserState != 0) {
 
 			megaLaserTimer++;
+
+			// コントローラーの振動（溜めている間は少しずつ強く、発射している間は強く振動し続ける）
+			if (megaLaserState == 1) {
+				if (megaLaserTimer < kMegaChargeFrames / 2) {
+					Controller::SetVibration(12000, 12000);
+				}
+				else {
+					Controller::SetVibration(30000, 30000);
+				}
+			}
+			else {
+				Controller::SetVibration(60000, 60000);
+			}
+
+			// 振動は2フレームごとに更新される（レーザーが終わると自然に止まる）
+			vibrationTimer = 2;
 
 			// ボスのほうを向き続ける
 			megaLaserAngle = atan2f(bossY - megaLaserY, bossX - megaLaserX);
@@ -3750,7 +4050,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						barrierHitTimer = kBarrierShowFrames;
 					}
 
-					damageBossShield(kMegaLaserDamage, 0);   // レーザーはバリアを壊せない
+					damageBossShield(kMegaLaserDamage, 0, (megaLaserTimer % kMegaPopupInterval == 0) ? kMegaPopupValue : 0);   // レーザーはバリアを壊せない
 
 					// 3フレームに1回、レーザーが当たっている場所から火花を出す
 					if (megaLaserTimer % 3 == 0) {
@@ -3879,6 +4179,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					}
 
 					lineCount = 0;
+				}
+			}
+		}
+
+		// ダメージの数字の更新（ふわっと上にのぼって消える）
+		for (int popupUpdateIndex = 0; popupUpdateIndex < kMaxDamagePopups; popupUpdateIndex++) {
+
+			if (damagePopups[popupUpdateIndex].isExist) {
+
+				damagePopups[popupUpdateIndex].y -= 1.2f;
+				damagePopups[popupUpdateIndex].life--;
+
+				if (damagePopups[popupUpdateIndex].life <= 0) {
+					damagePopups[popupUpdateIndex].isExist = 0;
 				}
 			}
 		}
@@ -4143,7 +4457,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						barrierHitTimer = kBarrierShowFrames;
 					}
 
-					damageBossShield(kBeamDamage, 1);   // プレイヤーの弾はバリアを壊せる
+					damageBossShield(kBeamDamage, 1, kBeamPopupValue);   // プレイヤーの弾はバリアを壊せる
 
 					screenShakeTimer = 8;
 					Controller::SetVibration(60000, 60000);
@@ -4246,7 +4560,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					}
 
 					// ボスのシールドを減らす
-					damageBossShield(kLaserDamage, 0);   // レーザーはバリアを壊せない
+					damageBossShield(kLaserDamage, 0, kLaserPopupValue);   // レーザーはバリアを壊せない
 
 					screenShakeTimer = 8;
 					Controller::SetVibration(60000, 60000);
@@ -5398,9 +5712,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (bossState == 1 || bossState == 2) {
 			bossColor = WHITE;
 		}
-		else if (bossState == 4) {
-			bossColor = 0xFF6600FF;
-		}
 
 		// ボスの危険な赤いオーラ
 		if (bossState == 1) {
@@ -6136,14 +6447,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			kFillModeWireFrame
 		);
 
-		// 数値表示
-		Novice::ScreenPrintf(
-			shieldBarX,
-			shieldBarY - 25,
-			"BOSS ARMOR : %d / %d",
-			bossShield,
-			bossShieldMax
-		);
+		// 数値表示（ボスのHPの数字は出さない）
+		// Novice::ScreenPrintf(
+		// 	shieldBarX,
+		// 	shieldBarY - 25,
+		// 	"BOSS ARMOR : %d / %d",
+		// 	bossShield,
+		// 	bossShieldMax
+		// );
 
 		// 今の形態
 		Novice::ScreenPrintf(shieldBarX + shieldBarWidth + 20, shieldBarY - 25, "FORM : %d", bossPhase);
@@ -6168,11 +6479,58 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			Novice::DrawBox(shieldBarX, barrierBarY, shieldBarWidth, barrierBarHeight, 0.0f, WHITE, kFillModeWireFrame);
 
-			Novice::ScreenPrintf(shieldBarX, barrierBarY + 16, "BARRIER : %d / %d", bossBarrier, kBossBarrierMax);
+			// Novice::ScreenPrintf(shieldBarX, barrierBarY + 16, "BARRIER : %d / %d", bossBarrier, kBossBarrierMax);
 		}
 
 		if (bossIsInvincible) {
 			Novice::ScreenPrintf(shieldBarX + shieldBarWidth + 20, shieldBarY, "INVINCIBLE");
+		}
+
+		// ダメージの数字の描画（count0.png〜count9.png）
+		for (int popupDrawIndex = 0; popupDrawIndex < kMaxDamagePopups; popupDrawIndex++) {
+
+			if (!damagePopups[popupDrawIndex].isExist) {
+				continue;
+			}
+
+			// 出た直後は少し大きく、終わりに近づくと薄くなる
+			int popupAge = kDamagePopupLife - damagePopups[popupDrawIndex].life;
+			float popupScale = kCountDrawScale * (1.0f + ((popupAge < 6) ? (float)(6 - popupAge) / 6.0f * 0.5f : 0.0f));
+			unsigned int popupAlpha = 255;
+
+			if (damagePopups[popupDrawIndex].life < 15) {
+				popupAlpha = (unsigned int)(255.0f * (float)damagePopups[popupDrawIndex].life / 15.0f);
+			}
+
+			// 数字を1桁ずつ分ける
+			int popupDigits[4] = {};
+			int popupDigitCount = 0;
+			int popupValue = damagePopups[popupDrawIndex].value;
+
+			do {
+				popupDigits[popupDigitCount] = popupValue % 10;
+				popupValue /= 10;
+				popupDigitCount++;
+			} while (popupValue > 0 && popupDigitCount < 4);
+
+			float popupStep = (float)kCountImageW * popupScale * kCountDigitSpacing;
+			float popupTotalWidth = popupStep * (float)(popupDigitCount - 1) + (float)kCountImageW * popupScale;
+			float popupLeft = damagePopups[popupDrawIndex].x - popupTotalWidth / 2.0f;
+			float popupTop = damagePopups[popupDrawIndex].y - (float)kCountImageH * popupScale / 2.0f;
+
+			// popupDigits は1の位から入っているので、左から描くときは逆順にする
+			for (int popupDigitIndex = 0; popupDigitIndex < popupDigitCount; popupDigitIndex++) {
+
+				Novice::DrawSprite(
+					(int)(popupLeft + popupStep * (float)popupDigitIndex) + screenShakeX,
+					(int)popupTop + screenShakeY,
+					countTextures[popupDigits[popupDigitCount - 1 - popupDigitIndex]],
+					popupScale,
+					popupScale,
+					0.0f,
+					0xFFFFFF00 | popupAlpha
+				);
+			}
 		}
 
 		// UI表示
@@ -6181,17 +6539,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Novice::ScreenPrintf(10, 50, "Dash Count : %d / %d", dashCount, kMaxDashes);
 
 		if (attackType == 1) {
-			Novice::ScreenPrintf(10, 70, "Attack : 1 - Round Bullet");
+			Novice::ScreenPrintf(10, 70, "Attack : 1 - Round Bullet (X : switch)");
 		}
 		else {
-			Novice::ScreenPrintf(10, 70, "Attack : 2 - Laser");
+			Novice::ScreenPrintf(10, 70, "Attack : 2 - Laser (X : switch)");
 		}
 		Novice::ScreenPrintf(50, 90, "Current Frame : %d", currentFrame);
 		Novice::ScreenPrintf(10, 110, "Allies : %d", allyCount);
-		if (attackType == 2) {
-			Novice::ScreenPrintf(10, 150, "Dash x4 in a SQUARE : MEGA LASER");
+		if (attackType == 1) {
+			Novice::ScreenPrintf(10, 150, "Dash x4 in a SQUARE : summon %d allies (used up by MEGA LASER)", kSquareAllyCount);
 		}
-		Novice::ScreenPrintf(10, 130, "SHIFT : skip (%s)", (bossPhase == 2) ? "to FORM 3" : (bossPhase >= 3) ? "to GATHER" : "to FORM 2");
+		else if (attackType == 2) {
+			// Novice::ScreenPrintf(10, 150, "Dash x4 in a SQUARE : MEGA LASER");
+			Novice::ScreenPrintf(10, 150, "Dash x4 in a SQUARE : MEGA LASER (uses %d allies)", kMegaLaserAllyCost);
+		}
+		// Novice::ScreenPrintf(10, 130, "SHIFT : skip (%s)", (bossPhase == 2) ? "to FORM 3" : (bossPhase >= 3) ? "to GATHER" : "to FORM 2");
+		Novice::ScreenPrintf(10, 130, "SHIFT : skip (%s)", (bossPhase == 2) ? "to FORM 3" : (bossPhase >= 3) ? "to TITLE" : "to FORM 2");
+		Novice::ScreenPrintf(10, 190, "MEGA LASER allies : %d / %d", countSummonedAllies(), kMegaLaserAllyCost);
 
 		// プレイヤーのHP（右上）
 		Novice::ScreenPrintf(1440, 40, "HP");
