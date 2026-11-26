@@ -97,6 +97,20 @@ struct Spark
 	int isExist;
 };
 
+// バリアが割れたときに飛び散る破片
+struct BarrierShard
+{
+	float x;
+	float y;
+	float velocityX;
+	float velocityY;
+	float angle;
+	float spin;
+	float size;
+	int life;
+	int isExist;
+};
+
 // 放射状のヒットエフェクト
 struct HitBurst
 {
@@ -309,10 +323,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 第3形態のバリア（プレイヤーの弾だけが壊せる）
 	// const int kBossBarrierMax = kBossShieldMax2;         // バリアの耐久値（第2形態のシールドと同じ）
-	const int kBossBarrierMax = kBossShieldMax;          // バリアの耐久値（第1形態のシールドと同じ）
+	const int kBossBarrierMax = 600;                     // バリアの耐久値（第3形態）
 	const float kBossBarrierExtraRadius = 50.0f;         // ボスの体よりどれだけ外側までバリアがあるか
 	int bossBarrier = 0;
 	int bossBarrierBreakTimer = 0;                       // バリアが壊れたときの演出
+
+	// バリアは、弾が当たったときだけ見える
+	int barrierHitTimer = 0;                             // 残りの表示フレーム数
+	const int kBarrierShowFrames = 45;                   // 当たってから見えている長さ
+
+	// バリアが割れたときの破片
+	const int kMaxBarrierShards = 40;
+	const int kBarrierShardLife = 45;
+	BarrierShard barrierShards[kMaxBarrierShards] = {};
 
 	// 回転レーザー（シールドが半分以下になったら、各形態で1回だけ使う）
 	int bossRotLaserUsed = 0;              // 今の形態でもう使ったか
@@ -792,6 +815,43 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	DashLine lines[kMaxLines] = {};
 	int lineCount = 0;
 
+	// 溜め技（レーザーモードで4回のダッシュが四角になると、四角の真ん中から超極太レーザーを出す）
+	int megaLaserState = 0;                      // 0:なし 1:溜め 2:発射中
+	int megaLaserTimer = 0;
+	float megaLaserX = 0.0f;                     // 四角の真ん中（レーザーの出る場所）
+	float megaLaserY = 0.0f;
+	float megaLaserAngle = 0.0f;                 // レーザーの向き（ボスのほうを向き続ける）
+	const int kMegaChargeFrames = 90;            // 溜めの長さ（1.5秒）
+	const int kMegaFireFrames = 300;             // レーザーを出している長さ（5秒）
+	const float kMegaLaserHalfWidth = 110.0f;    // レーザーの太さの半分（超極太）
+	const float kMegaLaserLength = 2600.0f;      // レーザーの長さ（画面の外まで届く）
+	const int kMegaLaserDamage = 3;              // 1フレームあたりのダメージ（300フレームで最大900）
+
+	// プレイヤーのHP（ボスの攻撃に当たるとへる）
+	const int kPlayerMaxHp = 5;
+	int playerHp = kPlayerMaxHp;
+	int playerInvincibleTimer = 0;               // 当たったあとの無敵時間（点滅する）
+	const int kPlayerInvincibleFrames = 90;      // 無敵の長さ（1.5秒）
+	int isPlayerDead = 0;                        // 1 = やられた
+	int playerDeadTimer = 0;
+	const int kPlayerDeadFrames = 150;           // やられてから敵集めに戻るまで（2.5秒）
+
+	// 爆弾の爆発の大きさ（当たる範囲と、爆発の円の大きさ）
+	const float kBombExplosionRadius = 120.0f;         // 通常の爆弾
+	const float kGlitchBombExplosionRadius = 120.0f;   // グリッチ爆弾
+
+	// 弾の追尾
+	const float kBeamHomingRate = 1.0f;          // 1.0 = 毎フレームボスのほうへ向きを合わせる（絶対に当たる）。小さくすると曲がり方がゆるくなる
+
+	// ダッシュのスタミナ
+	const float kStaminaMax = 100.0f;
+	const float kDashStaminaCost = 20.0f;        // ダッシュ1回で減る量（満タンで5回）
+	const float kStaminaRegen = 0.6f;            // 1フレームで回復する量
+	const int kStaminaRegenDelay = 40;           // ダッシュしてから回復が始まるまでのフレーム数
+	float stamina = kStaminaMax;
+	int staminaRegenTimer = 0;
+	int staminaFlashTimer = 0;                   // スタミナが足りないとき、ゲージを赤く点滅させる
+
 	// 砲台の初期化
 	for (int boxInitIndex = 0; boxInitIndex < kMaxBoxes; boxInitIndex++) {
 		boxes[boxInitIndex].isExist = 0;
@@ -1022,6 +1082,114 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// SHIFTスキップ用：状態のリセット処理
 	// ==============================
 
+	// プレイヤーにダメージを与える。当たったときだけ true を返す
+	// （無敵中・ダッシュで移動中・やられたあとは当たらない）
+	auto damagePlayer = [&](int damage) {
+
+		if (isPlayerDead || playerInvincibleTimer > 0 || dashMoveTimer > 0) {
+			return false;
+		}
+
+		playerHp -= damage;
+		playerInvincibleTimer = kPlayerInvincibleFrames;
+
+		screenShakeTimer = 10 + damage * 5;
+		Controller::SetVibration(60000, 60000);
+		vibrationTimer = 3;
+
+		if (playerHp <= 0) {
+			playerHp = 0;
+			isPlayerDead = 1;
+			playerDeadTimer = 0;
+		}
+
+		return true;
+		};
+
+	// 4回のダッシュの軌道線が「四角」になっているか調べる（なっていれば真ん中の位置を返す）
+	// 四角の条件：
+	//   ・4本とも、ある程度の長さがある（壁にぶつかって短くなっていない）
+	//   ・線がつながっていて、4本目の終わりが1本目の始まりに戻ってくる
+	//   ・毎回およそ90度ずつ、同じ向きに曲がっている
+	auto detectSquareDash = [&](float& centerOutX, float& centerOutY) {
+
+		if (lineCount < 4) {
+			return false;
+		}
+
+		const int firstLine = lineCount - 4;
+		const float kSquareJoinTolerance = 150.0f;   // つなぎ目・閉じ目のずれの許容
+		const float kSquareMinSide = 60.0f;          // これより短い辺は四角と認めない
+		const float kPi = 3.14159265f;
+
+		float sideAngle[4];
+
+		for (int squareIndex = 0; squareIndex < 4; squareIndex++) {
+
+			float sideDx = lines[firstLine + squareIndex].endX - lines[firstLine + squareIndex].startX;
+			float sideDy = lines[firstLine + squareIndex].endY - lines[firstLine + squareIndex].startY;
+
+			if (sideDx * sideDx + sideDy * sideDy < kSquareMinSide * kSquareMinSide) {
+				return false;
+			}
+
+			sideAngle[squareIndex] = atan2f(sideDy, sideDx);
+		}
+
+		float turnSign = 0.0f;
+
+		for (int squareIndex = 0; squareIndex < 4; squareIndex++) {
+
+			int nextIndex = (squareIndex + 1) % 4;
+
+			// つながっているか（4本目→1本目は閉じているか）
+			float joinDx = lines[firstLine + nextIndex].startX - lines[firstLine + squareIndex].endX;
+			float joinDy = lines[firstLine + nextIndex].startY - lines[firstLine + squareIndex].endY;
+
+			if (joinDx * joinDx + joinDy * joinDy > kSquareJoinTolerance * kSquareJoinTolerance) {
+				return false;
+			}
+
+			// 曲がる角度（60度〜120度）と、曲がる向き
+			float turn = sideAngle[nextIndex] - sideAngle[squareIndex];
+
+			while (turn > kPi) {
+				turn -= kPi * 2.0f;
+			}
+
+			while (turn < -kPi) {
+				turn += kPi * 2.0f;
+			}
+
+			if (fabsf(turn) < kPi / 3.0f || fabsf(turn) > kPi * 2.0f / 3.0f) {
+				return false;
+			}
+
+			float thisSign = (turn > 0.0f) ? 1.0f : -1.0f;
+
+			if (squareIndex == 0) {
+				turnSign = thisSign;
+			}
+			else if (thisSign != turnSign) {
+				return false;
+			}
+		}
+
+		// 真ん中（8つの端点の平均）
+		float sumX = 0.0f;
+		float sumY = 0.0f;
+
+		for (int squareIndex = 0; squareIndex < 4; squareIndex++) {
+			sumX += lines[firstLine + squareIndex].startX + lines[firstLine + squareIndex].endX;
+			sumY += lines[firstLine + squareIndex].startY + lines[firstLine + squareIndex].endY;
+		}
+
+		centerOutX = sumX / 8.0f;
+		centerOutY = sumY / 8.0f;
+
+		return true;
+		};
+
 	// ボス戦の状態を、指定した形態の開始時点に戻す（1:第1形態 2:第2形態 3:第3形態）
 	auto resetBossFight = [&](int phase) {
 
@@ -1031,6 +1199,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		bossShield = bossShieldMax;
 		bossBarrier = (phase == 3) ? kBossBarrierMax : 0;
 		bossBarrierBreakTimer = 0;
+		barrierHitTimer = 0;
+
+		for (int shardResetIndex = 0; shardResetIndex < kMaxBarrierShards; shardResetIndex++) {
+			barrierShards[shardResetIndex].isExist = 0;
+		}
 		bossIsInvincible = 0;
 		bossShieldBreakTimer = 0;
 		shieldBreakEffectTimer = 0;
@@ -1072,6 +1245,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		reflectActiveCount = 0;
 		bossBigTimer = 0;
 		bossBigHit = 0;
+
+		// 溜め技
+		megaLaserState = 0;
+		megaLaserTimer = 0;
+
+		// プレイヤーのHPとスタミナ
+		playerHp = kPlayerMaxHp;
+		playerInvincibleTimer = 0;
+		isPlayerDead = 0;
+		playerDeadTimer = 0;
+		stamina = kStaminaMax;
+		staminaRegenTimer = 0;
+		staminaFlashTimer = 0;
 
 		// プレイヤー
 		playerX = 960.0f;
@@ -1269,6 +1455,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				skipToBossPhase(3);
 			}
 			else {
+				skipToStage();
+			}
+		}
+
+		// やられたら、少しだけ間をおいてから敵集めに戻る
+		if (isPlayerDead) {
+
+			playerDeadTimer++;
+
+			if (playerDeadTimer >= kPlayerDeadFrames) {
 				skipToStage();
 			}
 		}
@@ -1968,10 +2164,65 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (bossBarrierBreakTimer > 0) {
 
 			if (bossBarrierBreakTimer == 30) {
+
 				screenShakeTimer = 25;
+				Controller::SetVibration(60000, 60000);
+				vibrationTimer = 8;
+
+				// バリアのふちから、破片が外へ飛び散る
+				const int kBarrierShardCount = 28;
+
+				for (int shardSpawnCount = 0; shardSpawnCount < kBarrierShardCount; shardSpawnCount++) {
+
+					for (int shardSpawnIndex = 0; shardSpawnIndex < kMaxBarrierShards; shardSpawnIndex++) {
+
+						if (!barrierShards[shardSpawnIndex].isExist) {
+
+							float shardAngle = 6.2831853f * (float)shardSpawnCount / (float)kBarrierShardCount
+								+ (float)(rand() % 100 - 50) / 400.0f;
+							float shardSpeed = 5.0f + (float)(rand() % 100) / 10.0f;
+							float shardRadius = bossRadius + kBossBarrierExtraRadius;
+
+							barrierShards[shardSpawnIndex].x = bossX + cosf(shardAngle) * shardRadius;
+							barrierShards[shardSpawnIndex].y = bossY + sinf(shardAngle) * shardRadius;
+							barrierShards[shardSpawnIndex].velocityX = cosf(shardAngle) * shardSpeed;
+							barrierShards[shardSpawnIndex].velocityY = sinf(shardAngle) * shardSpeed;
+							barrierShards[shardSpawnIndex].angle = (float)(rand() % 628) / 100.0f;
+							barrierShards[shardSpawnIndex].spin = (float)(rand() % 100 - 50) / 200.0f;
+							barrierShards[shardSpawnIndex].size = 14.0f + (float)(rand() % 14);
+							barrierShards[shardSpawnIndex].life = kBarrierShardLife;
+							barrierShards[shardSpawnIndex].isExist = 1;
+							break;
+						}
+					}
+				}
 			}
 
 			bossBarrierBreakTimer--;
+		}
+
+		// 弾が当たったときのバリアの表示タイマー
+		if (barrierHitTimer > 0) {
+			barrierHitTimer--;
+		}
+
+		// バリアの破片の更新
+		for (int shardUpdateIndex = 0; shardUpdateIndex < kMaxBarrierShards; shardUpdateIndex++) {
+
+			if (!barrierShards[shardUpdateIndex].isExist) {
+				continue;
+			}
+
+			barrierShards[shardUpdateIndex].x += barrierShards[shardUpdateIndex].velocityX;
+			barrierShards[shardUpdateIndex].y += barrierShards[shardUpdateIndex].velocityY;
+			barrierShards[shardUpdateIndex].velocityX *= 0.94f;
+			barrierShards[shardUpdateIndex].velocityY *= 0.94f;
+			barrierShards[shardUpdateIndex].angle += barrierShards[shardUpdateIndex].spin;
+			barrierShards[shardUpdateIndex].life--;
+
+			if (barrierShards[shardUpdateIndex].life <= 0) {
+				barrierShards[shardUpdateIndex].isExist = 0;
+			}
 		}
 
 		// シールド破壊エフェクトのタイマー
@@ -2322,6 +2573,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			bossX += bossChargeVelocityX;
 			bossY += bossChargeVelocityY;
 
+			// 突進してくるボス本体と分身に当たったらダメージ（ダッシュで避けられる）
+			{
+				float chargeBodyDx = playerX - bossX;
+				float chargeBodyDy = playerY - bossY;
+
+				if (sqrtf(chargeBodyDx * chargeBodyDx + chargeBodyDy * chargeBodyDy) <= bossRadius + playerRadius * 0.7f) {
+					damagePlayer(1);
+				}
+
+				for (int cloneHitIndex = 0; cloneHitIndex < kMaxBossClones; cloneHitIndex++) {
+
+					if (!bossClones[cloneHitIndex].isExist) {
+						continue;
+					}
+
+					float cloneHitDx = playerX - bossClones[cloneHitIndex].x;
+					float cloneHitDy = playerY - bossClones[cloneHitIndex].y;
+
+					if (sqrtf(cloneHitDx * cloneHitDx + cloneHitDy * cloneHitDy) <= bossRadius + playerRadius * 0.7f) {
+						damagePlayer(1);
+					}
+				}
+			}
+
 			// 爆弾を落とす
 			bombDropTimer++;
 
@@ -2591,11 +2866,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						rotAlong <= kRotLaserLength &&
 						fabsf(rotSide) <= kRotLaserWidth * 0.5f * rotHitGrow + playerRadius) {
 
-						// プレイヤーに当たった（今はまだダメージの処理がないので、揺れと振動だけ）
-						bossRotLaserHit = 1;
-						screenShakeTimer = 15;
-						Controller::SetVibration(60000, 60000);
-						vibrationTimer = 3;
+						if (damagePlayer(1)) {
+							bossRotLaserHit = 1;
+						}
 					}
 				}
 			}
@@ -2646,11 +2919,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 							if (!bossBigHit && isPlayerInBeam(crossBeamAngle(crossWave, crossHitIndex), kCrossLaserWidth * 0.5f)) {
 
-								// プレイヤーに当たった（今はまだダメージの処理がないので、揺れと振動だけ）
-								bossBigHit = 1;
-								screenShakeTimer = 15;
-								Controller::SetVibration(60000, 60000);
-								vibrationTimer = 3;
+								if (damagePlayer(1)) {
+									bossBigHit = 1;
+								}
 							}
 						}
 					}
@@ -2710,10 +2981,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						fabsf(blastDist - blastRadius) <= kBlastRingThickness * 0.5f + playerRadius &&
 						fabsf(blastDiff) > kBlastGapHalf) {
 
-						blastRingHit[blastIndex] = 1;
-						screenShakeTimer = 15;
-						Controller::SetVibration(60000, 60000);
-						vibrationTimer = 3;
+						if (damagePlayer(1)) {
+							blastRingHit[blastIndex] = 1;
+						}
 					}
 				}
 			}
@@ -2811,11 +3081,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 									distPlayerToSegment(hitPathX[reflectSegIndex], hitPathY[reflectSegIndex], hitPathX[reflectSegIndex + 1], hitPathY[reflectSegIndex + 1])
 									<= kReflectLaserWidth * 0.5f + playerRadius) {
 
-									// プレイヤーに当たった（今はまだダメージの処理がないので、揺れと振動だけ）
-									bossBigHit = 1;
-									screenShakeTimer = 15;
-									Controller::SetVibration(60000, 60000);
-									vibrationTimer = 3;
+									if (damagePlayer(1)) {
+										bossBigHit = 1;
+									}
 								}
 							}
 						}
@@ -2861,10 +3129,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 				if (!bossBigHit && !isInSafe) {
 
-					bossBigHit = 1;
-					screenShakeTimer = 20;
-					Controller::SetVibration(60000, 60000);
-					vibrationTimer = 3;
+					if (damagePlayer(2)) {
+						bossBigHit = 1;
+					}
 				}
 			}
 
@@ -3003,6 +3270,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (keys[DIK_A]) moveX -= 1.0f;
 		if (keys[DIK_D]) moveX += 1.0f;
 
+		// やられている間は動けない
+		if (isPlayerDead) {
+			moveX = 0.0f;
+			moveY = 0.0f;
+		}
+
 		// 攻撃タイプ切り替え
 		if (keys[DIK_1] && !preKeys[DIK_1]) {
 			attackType = 1;
@@ -3133,6 +3406,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// if (hitDx * hitDx + hitDy * hitDy < (bossRadius + 8.0f) * (bossRadius + 8.0f)) {
 			if (hitDx * hitDx + hitDy * hitDy < (bossRadius + 8.0f + allyBarrierPad) * (bossRadius + 8.0f + allyBarrierPad)) {
 
+				// バリアに当たったら、バリアが見えるようになる
+				if (bossBarrier > 0) {
+					barrierHitTimer = kBarrierShowFrames;
+				}
+
 				// ボスのシールドを減らす（無敵中・バリア中は減らさない）
 				if (bossShield > 0 && !bossIsInvincible && bossBarrier <= 0) {
 					bossShield -= 1;
@@ -3210,6 +3488,34 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// --- 無敵時間とスタミナの更新 ---
+		if (playerInvincibleTimer > 0) {
+			playerInvincibleTimer--;
+		}
+
+		if (staminaFlashTimer > 0) {
+			staminaFlashTimer--;
+		}
+
+		// ダッシュしてから少し待つと、スタミナが回復していく
+		if (staminaRegenTimer > 0) {
+			staminaRegenTimer--;
+		}
+		else if (stamina < kStaminaMax) {
+
+			stamina += kStaminaRegen;
+
+			if (stamina > kStaminaMax) {
+				stamina = kStaminaMax;
+			}
+		}
+
+		// スタミナが足りないのにダッシュを押したら、ゲージを赤く点滅させる
+		if ((Controller::IsPressed(kPadButton10) || (keys[DIK_SPACE] && !preKeys[DIK_SPACE])) &&
+			!isAttacking && !isPlayerDead && stamina < kDashStaminaCost) {
+			staminaFlashTimer = 24;
+		}
+
 		// --- ダッシュ実行 ---
 		//　ダッシュボタンが押されたとき、ダッシュが最大回数より小さかった時
 		if ((Controller::IsPressed(kPadButton10) ||
@@ -3219,7 +3525,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 
 			//　ダッシュがクールダウン中ではない時かつ、攻撃中じゃないなら
-			if (dashCooldown <= 0 && !isAttacking)
+			if (dashCooldown <= 0 && !isAttacking && !isPlayerDead && stamina >= kDashStaminaCost)
 			{
 				currentFrame = 0;
 				isCurrentFrameCount = 1;
@@ -3328,11 +3634,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				dashCount++;
 				dashCooldown = kDashCooldownMax;
 
+				// スタミナを使う
+				stamina -= kDashStaminaCost;
+				staminaRegenTimer = kStaminaRegenDelay;
+
 				if (dashCount == kMaxDashes) {
 					isAttacking = true;
 					currentAttackIndex = 0;
 					attackTimer = 10;
 
+					// レーザーモードで四角を作っていたら、普通の発射ではなく溜め技にする
+					if (attackType == 2 && detectSquareDash(megaLaserX, megaLaserY)) {
+
+						megaLaserState = 1;
+						megaLaserTimer = 0;
+						megaLaserAngle = atan2f(bossY - megaLaserY, bossX - megaLaserX);
+
+						// 砲台（ひし形・小さな長方形）は出さない
+						for (int megaHideIndex = 0; megaHideIndex < kMaxBoxes; megaHideIndex++) {
+							boxes[megaHideIndex].isExist = 0;
+							diamonds[megaHideIndex].isExist = 0;
+						}
+					}
 				}
 			}
 
@@ -3363,8 +3686,127 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
+		// --- 溜め技（超極太レーザー）の処理 ---
+		if (megaLaserState != 0) {
+
+			megaLaserTimer++;
+
+			// ボスのほうを向き続ける
+			megaLaserAngle = atan2f(bossY - megaLaserY, bossX - megaLaserX);
+
+			if (megaLaserState == 1) {
+
+				// 溜めの終わりが近づくと画面が小さく揺れる
+				if (megaLaserTimer > kMegaChargeFrames - 40 && megaLaserTimer % 6 == 0) {
+					screenShakeTimer = 3;
+				}
+
+				// 溜まったら発射
+				if (megaLaserTimer >= kMegaChargeFrames) {
+					megaLaserState = 2;
+					megaLaserTimer = 0;
+					screenShakeTimer = 20;
+				}
+			}
+			else {
+
+				// 出るときは8フレームで太くなり、消えるときは15フレームで細くなる
+				float megaHitGrow = (float)megaLaserTimer / 8.0f;
+				float megaHitFade = (float)(kMegaFireFrames - megaLaserTimer) / 15.0f;
+
+				if (megaHitGrow > 1.0f) {
+					megaHitGrow = 1.0f;
+				}
+
+				if (megaHitFade < megaHitGrow) {
+					megaHitGrow = megaHitFade;
+				}
+
+				if (megaHitGrow < 0.0f) {
+					megaHitGrow = 0.0f;
+				}
+
+				float megaDirX = cosf(megaLaserAngle);
+				float megaDirY = sinf(megaLaserAngle);
+				float megaToBossX = bossX - megaLaserX;
+				float megaToBossY = bossY - megaLaserY;
+
+				// レーザーの進行方向にどれだけ進んでいるか／横にどれだけ離れているか
+				float megaAlong = megaToBossX * megaDirX + megaToBossY * megaDirY;
+				float megaSide = -megaToBossX * megaDirY + megaToBossY * megaDirX;
+
+				// バリアがあるときは、バリアの外側で当たる
+				float megaBarrierPad = (bossBarrier > 0) ? kBossBarrierExtraRadius : 0.0f;
+				float megaHitRange = kMegaLaserHalfWidth * megaHitGrow + bossRadius + megaBarrierPad;
+
+				// 出ている間はずっと画面を揺らす
+				screenShakeTimer = 3;
+
+				// ボスに当たっている間、毎フレームシールドを減らす
+				if (megaAlong >= 0.0f && megaAlong <= kMegaLaserLength + bossRadius && fabsf(megaSide) <= megaHitRange) {
+
+					// バリアに当たっている間は、バリアが見えている
+					if (bossBarrier > 0) {
+						barrierHitTimer = kBarrierShowFrames;
+					}
+
+					damageBossShield(kMegaLaserDamage, 0);   // レーザーはバリアを壊せない
+
+					// 3フレームに1回、レーザーが当たっている場所から火花を出す
+					if (megaLaserTimer % 3 == 0) {
+
+						float megaHitX = bossX - megaDirX * (bossRadius + megaBarrierPad);
+						float megaHitY = bossY - megaDirY * (bossRadius + megaBarrierPad);
+
+						for (int megaSparkCount = 0; megaSparkCount < 8; megaSparkCount++) {
+
+							for (int megaSparkIndex = 0; megaSparkIndex < kMaxSparks; megaSparkIndex++) {
+
+								if (!sparks[megaSparkIndex].isExist) {
+
+									sparks[megaSparkIndex].x = megaHitX;
+									sparks[megaSparkIndex].y = megaHitY;
+
+									sparks[megaSparkIndex].velocityX =
+										static_cast<float>(rand() % 160 - 80) / 10.0f;
+
+									sparks[megaSparkIndex].velocityY =
+										static_cast<float>(rand() % 160 - 80) / 10.0f;
+
+									sparks[megaSparkIndex].life = 40;
+									sparks[megaSparkIndex].isExist = 1;
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				// 5秒たった、またはボスのシールドが壊れたら終わり（普通の攻撃の終わりと同じ後片付け）
+				if (megaLaserTimer >= kMegaFireFrames || bossShield <= 0 || shieldBreakEffectTimer > 0) {
+
+					megaLaserState = 0;
+					megaLaserTimer = 0;
+
+					for (int megaClearIndex = 0; megaClearIndex < kMaxBoxes; megaClearIndex++) {
+						diamonds[megaClearIndex].isExist = 0;
+					}
+
+					dashCount = 0;
+					boxCount = 0;
+					isAttacking = 0;
+
+					for (int megaClearLineIndex = 0; megaClearLineIndex < kMaxLines; megaClearLineIndex++) {
+						lines[megaClearLineIndex].isExist = 0;
+					}
+
+					lineCount = 0;
+				}
+			}
+		}
+
 		// --- 連続照射処理 ---
-		if (isAttacking) {
+		if (isAttacking && megaLaserState == 0) {
 
 			if (attackTimer > 0) {
 				attackTimer--;
@@ -3497,6 +3939,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					if (bombs[bombUpdateIndex].timer <= 0) {
 
 						bombs[bombUpdateIndex].exploded = 1;
+
+						// 爆発に巻き込まれたらダメージ
+						{
+							float bombHitRadius = bombs[bombUpdateIndex].isGlitch ? kGlitchBombExplosionRadius : kBombExplosionRadius;
+							float bombHitDx = playerX - bombs[bombUpdateIndex].x;
+							float bombHitDy = playerY - bombs[bombUpdateIndex].y;
+
+							if (sqrtf(bombHitDx * bombHitDx + bombHitDy * bombHitDy) <= bombHitRadius + playerRadius) {
+								damagePlayer(1);
+							}
+						}
 
 						if (bombs[bombUpdateIndex].isGlitch) {
 							bombs[bombUpdateIndex].life = 12;
@@ -3645,6 +4098,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					beams[beamUpdateIndex].speed = 35.0f;
 				}
 
+				// 弾はボスを追いかける（ボスが動いても絶対に当たる）
+				{
+					float homingDx = bossX - beams[beamUpdateIndex].x;
+					float homingDy = bossY - beams[beamUpdateIndex].y;
+					float homingLength = sqrtf(homingDx * homingDx + homingDy * homingDy);
+
+					if (homingLength > 0.001f) {
+
+						// いまの向きに、ボスの向きを混ぜて、長さを1にそろえる
+						float homingVx = beams[beamUpdateIndex].velocityX * (1.0f - kBeamHomingRate) + homingDx / homingLength * kBeamHomingRate;
+						float homingVy = beams[beamUpdateIndex].velocityY * (1.0f - kBeamHomingRate) + homingDy / homingLength * kBeamHomingRate;
+						float homingVLength = sqrtf(homingVx * homingVx + homingVy * homingVy);
+
+						if (homingVLength > 0.001f) {
+							beams[beamUpdateIndex].velocityX = homingVx / homingVLength;
+							beams[beamUpdateIndex].velocityY = homingVy / homingVLength;
+						}
+						else {
+							beams[beamUpdateIndex].velocityX = homingDx / homingLength;
+							beams[beamUpdateIndex].velocityY = homingDy / homingLength;
+						}
+					}
+				}
+
 				beams[beamUpdateIndex].x += beams[beamUpdateIndex].velocityX * beams[beamUpdateIndex].speed;
 				beams[beamUpdateIndex].y += beams[beamUpdateIndex].velocityY * beams[beamUpdateIndex].speed;
 
@@ -3661,13 +4138,29 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					beams[beamUpdateIndex].isShot = 0;
 
 					// ボスのシールドを減らす
+					// バリアに当たったら、バリアが見えるようになる（当たった向きが光る）
+					if (bossBarrier > 0) {
+						barrierHitTimer = kBarrierShowFrames;
+					}
+
 					damageBossShield(kBeamDamage, 1);   // プレイヤーの弾はバリアを壊せる
 
 					screenShakeTimer = 8;
 					Controller::SetVibration(60000, 60000);
 					vibrationTimer = 3;
 
-					// ボスの中心から火花を発生
+					// 弾が当たった場所（弾からボスの中心への線が、ボスの表面と交わるところ）
+					float beamHitDistance = sqrtf(dx * dx + dy * dy);
+					float beamHitRadius = bossRadius + beamBarrierPad;
+					float beamHitX = beams[beamUpdateIndex].x;
+					float beamHitY = beams[beamUpdateIndex].y;
+
+					if (beamHitDistance > 0.001f) {
+						beamHitX = bossX - dx / beamHitDistance * beamHitRadius;
+						beamHitY = bossY - dy / beamHitDistance * beamHitRadius;
+					}
+
+					// 弾が当たった場所から火花を発生
 					for (int p = 0; p < 25; p++) {
 
 						for (int sparkSpawnIndex = 0; sparkSpawnIndex < kMaxSparks; sparkSpawnIndex++) {
@@ -3676,8 +4169,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 
 
-								sparks[sparkSpawnIndex].x = bossX;
-								sparks[sparkSpawnIndex].y = bossY;
+								sparks[sparkSpawnIndex].x = beamHitX;
+								sparks[sparkSpawnIndex].y = beamHitY;
 
 								// X・Y方向の速度をランダムに設定
 								sparks[sparkSpawnIndex].velocityX =
@@ -3746,6 +4239,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 					along <= lasers[laserUpdateIndex].length + bossRadius + laserBarrierPad &&
 					side * side <= (bossRadius + laserBarrierPad) * (bossRadius + laserBarrierPad) &&
 					!lasers[laserUpdateIndex].sparkMade) {
+
+					// バリアに当たったら、バリアが見えるようになる
+					if (bossBarrier > 0) {
+						barrierHitTimer = kBarrierShowFrames;
+					}
 
 					// ボスのシールドを減らす
 					damageBossShield(kLaserDamage, 0);   // レーザーはバリアを壊せない
@@ -4067,15 +4565,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 		}
 
-		// 第3形態のバリア
-		if (bossBarrier > 0) {
+		// 第3形態のバリア（弾が当たったときだけ見える）
+		if (bossBarrier > 0 && barrierHitTimer > 0) {
 
 			float barrierRatio = (float)bossBarrier / (float)kBossBarrierMax;
+			float barrierShow = (float)barrierHitTimer / (float)kBarrierShowFrames;   // 1から0へ、だんだん消えていく
 			float barrierDrawRadius = bossRadius + kBossBarrierExtraRadius;
 
-			// 残りが少ないほど薄くなる
-			unsigned int barrierFillAlpha = 0x20 + (unsigned int)(0x40 * barrierRatio);
-			unsigned int barrierLineAlpha = 0x70 + (unsigned int)(0x8F * barrierRatio);
+			// 残りが少ないほど薄く、当たってから時間がたつほど薄くなる
+			unsigned int barrierFillAlpha = (unsigned int)((0x20 + 0x40 * barrierRatio) * barrierShow);
+			unsigned int barrierLineAlpha = (unsigned int)((0x70 + 0x8F * barrierRatio) * barrierShow);
 
 			Novice::DrawEllipse(
 				(int)bossX + screenShakeX,
@@ -4103,25 +4602,79 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				(int)(barrierDrawRadius - 10.0f),
 				(int)(barrierDrawRadius - 10.0f),
 				0.0f,
-				0x66CCFF00 | 0x60,
+				0x66CCFF00 | (unsigned int)(0x60 * barrierShow),
 				kFillModeWireFrame
 			);
+
 		}
 
-		// バリアが壊れたときに広がる輪
+		// バリアが割れたときの演出
 		if (bossBarrierBreakTimer > 0) {
 
-			float breakRingRadius = bossRadius + kBossBarrierExtraRadius + (float)(30 - bossBarrierBreakTimer) * 12.0f;
+			float breakAge = (float)(30 - bossBarrierBreakTimer);
+			float breakRate = (float)bossBarrierBreakTimer / 30.0f;
+			float breakBaseRadius = bossRadius + kBossBarrierExtraRadius;
 
-			Novice::DrawEllipse(
-				(int)bossX + screenShakeX,
-				(int)bossY + screenShakeY,
-				(int)breakRingRadius,
-				(int)breakRingRadius,
-				0.0f,
-				0xCCEEFF00 | (unsigned int)(bossBarrierBreakTimer * 8),
-				kFillModeWireFrame
-			);
+			// 割れた瞬間に、バリア全体が白く光る
+			if (bossBarrierBreakTimer > 24) {
+
+				Novice::DrawEllipse(
+					(int)bossX + screenShakeX,
+					(int)bossY + screenShakeY,
+					(int)breakBaseRadius,
+					(int)breakBaseRadius,
+					0.0f,
+					0xFFFFFF00 | (unsigned int)(0xC0 * (float)(bossBarrierBreakTimer - 24) / 6.0f),
+					kFillModeSolid
+				);
+			}
+
+			// 外へ広がる輪を2つ（少しずらして出す）
+			for (int breakRingIndex = 0; breakRingIndex < 2; breakRingIndex++) {
+
+				float breakRingRadius = breakBaseRadius + (breakAge - (float)breakRingIndex * 4.0f) * 14.0f;
+
+				if (breakRingRadius > breakBaseRadius) {
+
+					Novice::DrawEllipse(
+						(int)bossX + screenShakeX,
+						(int)bossY + screenShakeY,
+						(int)breakRingRadius,
+						(int)breakRingRadius,
+						0.0f,
+						0xCCEEFF00 | (unsigned int)(0xFF * breakRate),
+						kFillModeWireFrame
+					);
+				}
+			}
+		}
+
+		// バリアの破片（回りながら外へ飛んで、だんだん消える）
+		for (int shardDrawIndex = 0; shardDrawIndex < kMaxBarrierShards; shardDrawIndex++) {
+
+			if (!barrierShards[shardDrawIndex].isExist) {
+				continue;
+			}
+
+			float shardRate = (float)barrierShards[shardDrawIndex].life / (float)kBarrierShardLife;
+			float shardSize = barrierShards[shardDrawIndex].size * (0.5f + 0.5f * shardRate);
+			float shardAngle = barrierShards[shardDrawIndex].angle;
+
+			float shardX = barrierShards[shardDrawIndex].x + (float)screenShakeX;
+			float shardY = barrierShards[shardDrawIndex].y + (float)screenShakeY;
+
+			// 形がいびつな三角形にする
+			int shardX1 = (int)(shardX + cosf(shardAngle) * shardSize);
+			int shardY1 = (int)(shardY + sinf(shardAngle) * shardSize);
+			int shardX2 = (int)(shardX + cosf(shardAngle + 2.3f) * shardSize * 0.6f);
+			int shardY2 = (int)(shardY + sinf(shardAngle + 2.3f) * shardSize * 0.6f);
+			int shardX3 = (int)(shardX + cosf(shardAngle + 4.0f) * shardSize * 0.8f);
+			int shardY3 = (int)(shardY + sinf(shardAngle + 4.0f) * shardSize * 0.8f);
+
+			unsigned int shardAlpha = (unsigned int)(0xFF * shardRate);
+
+			Novice::DrawTriangle(shardX1, shardY1, shardX2, shardY2, shardX3, shardY3, 0x88DDFF00 | shardAlpha, kFillModeSolid);
+			Novice::DrawTriangle(shardX1, shardY1, shardX2, shardY2, shardX3, shardY3, 0xFFFFFF00 | shardAlpha, kFillModeWireFrame);
 		}
 
 		// 無敵中はボスのまわりに青い輪を出す
@@ -4331,6 +4884,104 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Novice::DrawEllipse((int)bossX + screenShakeX, (int)bossY + screenShakeY, (int)chargeOrb, (int)chargeOrb, 0.0f, 0xFF0000AA, kFillModeSolid);
 			Novice::DrawEllipse((int)bossX + screenShakeX, (int)bossY + screenShakeY, (int)(chargeOrb * 0.5f), (int)(chargeOrb * 0.5f), 0.0f, 0xFFCCCCFF, kFillModeSolid);
 			};
+
+		// 溜め技（超極太レーザー）の描画
+		if (megaLaserState == 1) {
+
+			// 溜め：まわりから光の粒が集まって、四角の真ん中の小さな丸がだんだん大きくなる
+			float megaChargeRate = (float)megaLaserTimer / (float)kMegaChargeFrames;
+
+			for (int megaDotIndex = 0; megaDotIndex < 16; megaDotIndex++) {
+
+				float megaDotAngle = 6.2831853f * (float)megaDotIndex / 16.0f + (float)megaLaserTimer * 0.12f;
+				float megaDotDistance = (1.0f - megaChargeRate) * (320.0f + (float)(megaDotIndex % 3) * 40.0f) + 40.0f;
+
+				Novice::DrawEllipse(
+					(int)(megaLaserX + cosf(megaDotAngle) * megaDotDistance) + screenShakeX,
+					(int)(megaLaserY + sinf(megaDotAngle) * megaDotDistance) + screenShakeY,
+					6,
+					6,
+					0.0f,
+					0x66CCFFFF,
+					kFillModeSolid
+				);
+			}
+
+			float megaOrb = 8.0f + megaChargeRate * 110.0f + sinf((float)megaLaserTimer * 0.6f) * 6.0f * megaChargeRate;
+
+			Novice::DrawEllipse((int)megaLaserX + screenShakeX, (int)megaLaserY + screenShakeY, (int)megaOrb, (int)megaOrb, 0.0f, 0x3399FFAA, kFillModeSolid);
+			Novice::DrawEllipse((int)megaLaserX + screenShakeX, (int)megaLaserY + screenShakeY, (int)(megaOrb * 0.5f), (int)(megaOrb * 0.5f), 0.0f, 0xFFFFFFFF, kFillModeSolid);
+		}
+		else if (megaLaserState == 2) {
+
+			// 出るときは8フレームで太くなり、消えるときは15フレームで細くなる
+			float megaDrawGrow = (float)megaLaserTimer / 8.0f;
+			float megaDrawFade = (float)(kMegaFireFrames - megaLaserTimer) / 15.0f;
+
+			if (megaDrawGrow > 1.0f) {
+				megaDrawGrow = 1.0f;
+			}
+
+			if (megaDrawFade < megaDrawGrow) {
+				megaDrawGrow = megaDrawFade;
+			}
+
+			if (megaDrawGrow > 0.0f) {
+
+				// 太さを少しだけ脈打たせる
+				float megaHalfWidth = kMegaLaserHalfWidth * megaDrawGrow * (1.0f + sinf((float)megaLaserTimer * 0.8f) * 0.04f);
+
+				float megaDrawDirX = cosf(megaLaserAngle);
+				float megaDrawDirY = sinf(megaLaserAngle);
+				float megaSideX = -megaDrawDirY;
+				float megaSideY = megaDrawDirX;
+
+				float megaStartX = megaLaserX + (float)screenShakeX;
+				float megaStartY = megaLaserY + (float)screenShakeY;
+				float megaEndX = megaStartX + megaDrawDirX * kMegaLaserLength;
+				float megaEndY = megaStartY + megaDrawDirY * kMegaLaserLength;
+
+				// 後ろのぼかし
+				float megaGlow = megaHalfWidth * 1.8f;
+
+				Novice::DrawQuad(
+					(int)(megaStartX - megaSideX * megaGlow), (int)(megaStartY - megaSideY * megaGlow),
+					(int)(megaEndX - megaSideX * megaGlow), (int)(megaEndY - megaSideY * megaGlow),
+					(int)(megaStartX + megaSideX * megaGlow), (int)(megaStartY + megaSideY * megaGlow),
+					(int)(megaEndX + megaSideX * megaGlow), (int)(megaEndY + megaSideY * megaGlow),
+					0, 0, 2400, 100,
+					bokasi2Texture,
+					0x66CCFF99
+				);
+
+				// 外側の水色の部分と、中心の白い部分
+				for (int megaLayer = 0; megaLayer < 2; megaLayer++) {
+
+					float megaLayerWidth = (megaLayer == 0) ? megaHalfWidth : megaHalfWidth * 0.45f;
+					unsigned int megaLayerColor = (megaLayer == 0) ? 0x66CCFFCC : 0xFFFFFFFF;
+
+					Novice::DrawTriangle(
+						(int)(megaStartX + megaSideX * megaLayerWidth), (int)(megaStartY + megaSideY * megaLayerWidth),
+						(int)(megaEndX + megaSideX * megaLayerWidth), (int)(megaEndY + megaSideY * megaLayerWidth),
+						(int)(megaEndX - megaSideX * megaLayerWidth), (int)(megaEndY - megaSideY * megaLayerWidth),
+						megaLayerColor,
+						kFillModeSolid
+					);
+
+					Novice::DrawTriangle(
+						(int)(megaStartX + megaSideX * megaLayerWidth), (int)(megaStartY + megaSideY * megaLayerWidth),
+						(int)(megaEndX - megaSideX * megaLayerWidth), (int)(megaEndY - megaSideY * megaLayerWidth),
+						(int)(megaStartX - megaSideX * megaLayerWidth), (int)(megaStartY - megaSideY * megaLayerWidth),
+						megaLayerColor,
+						kFillModeSolid
+					);
+				}
+
+				// レーザーの出る場所の光の球
+				Novice::DrawEllipse((int)megaStartX, (int)megaStartY, (int)(megaHalfWidth * 1.1f), (int)(megaHalfWidth * 1.1f), 0.0f, 0x66CCFFCC, kFillModeSolid);
+				Novice::DrawEllipse((int)megaStartX, (int)megaStartY, (int)(megaHalfWidth * 0.6f), (int)(megaHalfWidth * 0.6f), 0.0f, 0xFFFFFFFF, kFillModeSolid);
+			}
+		}
 
 		// 十字レーザーの描画
 		if (bossState == 7) {
@@ -4876,8 +5527,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 						Novice::DrawEllipse(
 							(int)x,
 							(int)y,
-							55,
-							55,
+							(int)(kGlitchBombExplosionRadius * 0.5f),
+							(int)(kGlitchBombExplosionRadius * 0.5f),
 							0.0f,
 							WHITE,
 							kFillModeSolid
@@ -4916,6 +5567,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				}
 				else {
 
+					// 通常の爆弾の爆発（当たる範囲を、だんだん薄くなる円で見せる）
+					unsigned int bombFadeAlpha = (unsigned int)(255.0f * (float)bombs[bombDrawIndex].life / 25.0f);
+
+					Novice::DrawEllipse((int)x, (int)y, (int)kBombExplosionRadius, (int)kBombExplosionRadius, 0.0f, 0xFF883300 | bombFadeAlpha, kFillModeSolid);
+					Novice::DrawEllipse((int)x, (int)y, (int)(kBombExplosionRadius * 0.5f), (int)(kBombExplosionRadius * 0.5f), 0.0f, 0xFFFFFF00 | bombFadeAlpha, kFillModeSolid);
 				}
 			}
 		}
@@ -5363,26 +6019,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			);
 		}
 
-		// プレイヤーの描画
-		Novice::DrawSprite(
-			(int)(playerX - 52) + screenShakeX,
-			(int)(playerY - 50) + screenShakeY,
-			bokasiTexture,
-			0.15f,
-			0.15f,
-			0.0f,
-			0x330033FF
-		);
+		// プレイヤーの描画（無敵の間は点滅する。やられたら消える）
+		if (!isPlayerDead && (playerInvincibleTimer == 0 || (playerInvincibleTimer / 4) % 2 == 0)) {
+			Novice::DrawSprite(
+				(int)(playerX - 52) + screenShakeX,
+				(int)(playerY - 50) + screenShakeY,
+				bokasiTexture,
+				0.15f,
+				0.15f,
+				0.0f,
+				0x330033FF
+			);
 
-		Novice::DrawSprite(
-			(int)(playerX - 32) + screenShakeX,
-			(int)(playerY - 32) + screenShakeY,
-			hosiTexture,
-			1.0f,
-			1.0f,
-			0.0f,
-			WHITE
-		);
+			Novice::DrawSprite(
+				(int)(playerX - 32) + screenShakeX,
+				(int)(playerY - 32) + screenShakeY,
+				hosiTexture,
+				1.0f,
+				1.0f,
+				0.0f,
+				WHITE
+			);
+		}
 
 		// 火花パーティクル描画
 		for (int sparkDrawIndex = 0; sparkDrawIndex < kMaxSparks; sparkDrawIndex++) {
@@ -5530,7 +6188,47 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 		Novice::ScreenPrintf(50, 90, "Current Frame : %d", currentFrame);
 		Novice::ScreenPrintf(10, 110, "Allies : %d", allyCount);
+		if (attackType == 2) {
+			Novice::ScreenPrintf(10, 150, "Dash x4 in a SQUARE : MEGA LASER");
+		}
 		Novice::ScreenPrintf(10, 130, "SHIFT : skip (%s)", (bossPhase == 2) ? "to FORM 3" : (bossPhase >= 3) ? "to GATHER" : "to FORM 2");
+
+		// プレイヤーのHP（右上）
+		Novice::ScreenPrintf(1440, 40, "HP");
+
+		for (int hpDrawIndex = 0; hpDrawIndex < kPlayerMaxHp; hpDrawIndex++) {
+
+			if (hpDrawIndex < playerHp) {
+				Novice::DrawBox(1480 + hpDrawIndex * 52, 30, 40, 40, 0.0f, 0xFF4466FF, kFillModeSolid);
+			}
+			else {
+				Novice::DrawBox(1480 + hpDrawIndex * 52, 30, 40, 40, 0.0f, 0x886677FF, kFillModeWireFrame);
+			}
+		}
+
+		// ダッシュのスタミナ（HPの下）。目盛りの1つぶんがダッシュ1回
+		Novice::ScreenPrintf(1424, 92, "DASH");
+
+		unsigned int staminaColor = 0x66DDFFFF;
+
+		if (staminaFlashTimer > 0 && (staminaFlashTimer / 4) % 2 == 0) {
+			staminaColor = 0xFF4444FF;
+		}
+
+		Novice::DrawBox(1480, 90, (int)(260.0f * stamina / kStaminaMax), 18, 0.0f, staminaColor, kFillModeSolid);
+		Novice::DrawBox(1480, 90, 260, 18, 0.0f, 0xFFFFFFFF, kFillModeWireFrame);
+
+		for (int staminaTickIndex = 1; staminaTickIndex < (int)(kStaminaMax / kDashStaminaCost); staminaTickIndex++) {
+
+			int staminaTickX = 1480 + (int)(260.0f * (float)staminaTickIndex * kDashStaminaCost / kStaminaMax);
+			Novice::DrawLine(staminaTickX, 90, staminaTickX, 108, 0xFFFFFF88);
+		}
+
+		// やられたとき
+		if (isPlayerDead) {
+			Novice::DrawBox(0, 0, 1920, 1180, 0.0f, 0x00000099, kFillModeSolid);
+			Novice::ScreenPrintf(880, 540, "GAME OVER");
+		}
 
 		///
 		/// ↑描画処理ここまで
